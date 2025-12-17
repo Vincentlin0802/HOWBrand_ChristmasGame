@@ -891,9 +891,9 @@ function detectGestureStable(lm) {
   const now = performance.now();
   const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
 
-  // 如果已经在 Story Mode 中，不能切换到其他手势，除非是 OK sign
-  if (inStoryMode && best !== 'ok sign') {
-    return currentStableGesture;  // 在 Story Mode 中只能通过 OK sign 退出
+  // If already in Story Mode, only allow the "OK sign" to exit
+  if (storyMode && best !== 'ok sign') {
+    return currentStableGesture;  // Prevent switching out of story mode unless "OK sign"
   }
 
   if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
@@ -903,37 +903,29 @@ function detectGestureStable(lm) {
     if (best === 'fist') {
       targetShape = 'tree'; 
       setStoryMode(false); 
-      inStoryMode = false;  // 退出 Story Mode
     }
     else if (best === 'open' && !awaitingPinchAfterOpen) {
-      // 检测到 open 手势，设置为准备进入 Story Mode
       targetShape = 'explode';
-      setStoryMode(false);  // 进入 open 状态，但不进入 Story Mode
-      awaitingPinchAfterOpen = true;  // 标记已检测到 open，等待 pinch
+      setStoryMode(false);  
+      awaitingPinchAfterOpen = true;  
     }
     else if (best === 'pinch' && awaitingPinchAfterOpen) {
-      // 检测到 pinch 手势，进入 Story Mode
-      setStoryMode(true);  // 进入 Story Mode
-      enlargeFirstImage();  // 放大第一张图片
-      awaitingPinchAfterOpen = false;  // 重置
-      inStoryMode = true;  // 设置进入 Story Mode
+      setStoryMode(true);  
+      enlargeFirstImage();  
+      awaitingPinchAfterOpen = false;  
     }
     else if (best === 'ok sign') {
-      // 检测到 OK sign，退出 Story Mode
       targetShape = 'heart';
       setStoryMode(false);
-      inStoryMode = false;  // 退出 Story Mode
-      awaitingPinchAfterOpen = false;  // 重置
     }
     else if (best === 'vsign') { 
       targetShape = 'logo'; 
       setStoryMode(false); 
-      inStoryMode = false;  // 退出 Story Mode
-      awaitingPinchAfterOpen = false;  // 重置
     }
   }
   return currentStableGesture;
 }
+
 
 
     function detectGestureRaw(lm) {
