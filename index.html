@@ -740,7 +740,7 @@
       const geo = new THREE.OctahedronGeometry(0.8);
       const mat = new THREE.MeshBasicMaterial({ color: 0xD4AF37 });
       starMesh = new THREE.Mesh(geo, mat);
-      starMesh.position.y = 9;
+      starMesh.position.y = 10.5;
       scene.add(starMesh);
     }
 
@@ -1046,12 +1046,21 @@ function detectGestureStable(lm) {
     cloud.points.geometry.attributes.position.needsUpdate = true;
     cloud.points.geometry.attributes.color.needsUpdate = true;
   }
-      if (starMesh) starMesh.visible = (targetShape === 'tree');
-      if (starMesh) starMesh.rotation.y += 0.6 * dt;
       if (starMesh) {
-  const scale = 1.0 + 0.1 * Math.sin(time * 3);
-  starMesh.scale.set(scale, scale, scale);
-  starMesh.rotation.y += 0.8 * dt;
+  // 只在圣诞树模式显示
+  starMesh.visible = (targetShape === 'tree');
+  
+  if (starMesh.visible) {
+    // 1. 旋转动画
+    starMesh.rotation.y += 0.6 * dt;
+    
+    // 2. 呼吸缩放：让它看起来在发光
+    const pulse = 1.0 + Math.sin(clock.getElapsedTime() * 3) * 0.15;
+    starMesh.scale.set(pulse, pulse, pulse);
+    
+    // 3. 动态高度：确保它始终悬浮在树尖上方，有一点点跳动感
+    starMesh.position.y = 10.5 + Math.sin(clock.getElapsedTime() * 2) * 0.2;
+  }
 }
 
       const sPos = snowSystem.geometry.attributes.position.array;
