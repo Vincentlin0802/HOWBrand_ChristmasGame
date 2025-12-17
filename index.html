@@ -866,62 +866,36 @@
     }
 
     function detectGestureStable(lm) {
-  const raw = detectGestureRaw(lm);
-  if (raw) {
-    gestureQueue.push(raw);
-    if (gestureQueue.length > CONFIG.gestureHistory) gestureQueue.shift();
-  } else {
-    return currentStableGesture;
-  }
+      const raw = detectGestureRaw(lm);
+      if (raw) {
+        gestureQueue.push(raw);
+        if (gestureQueue.length > CONFIG.gestureHistory) gestureQueue.shift();
+      } else {
+        return currentStableGesture;
+      }
 
-  const counts = {};
-  for (const g of gestureQueue) counts[g] = (counts[g] || 0) + 1;
+      const counts = {};
+      for (const g of gestureQueue) counts[g] = (counts[g] || 0) + 1;
 
-  let best = null, bestCount = 0;
-  for (const k in counts) {
-    if (counts[k] > bestCount) { 
-      best = k; 
-      bestCount = counts[k]; 
-    }
-  }
+      let best = null, bestCount = 0;
+      for (const k in counts) {
+        if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
+      }
 
-  const now = performance.now();
-  const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
+      const now = performance.now();
+      const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
 
-  // If already in Story Mode, only allow the "OK sign" to exit
-  if (storyMode && best !== 'ok sign') {
-    return currentStableGesture;  // Prevent switching out of story mode unless "OK sign"
-  }
+      if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
+        currentStableGesture = best;
+        lastSwitchTime = now;
 
-  if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
-    currentStableGesture = best;
-    lastSwitchTime = now;
-
-    if (best === 'fist') {
-      targetShape = 'tree'; 
-      setStoryMode(false); 
+        if (best === 'fist') { targetShape = 'tree'; setStoryMode(false); }
+        else if (best === 'open') { targetShape = 'explode'; setStoryMode(true); }
+        else if (best === 'thumbsup') { targetShape = 'heart'; setStoryMode(false); }
+        else if (best === 'vsign') { targetShape = 'logo'; setStoryMode(false); }
+      }
+      return currentStableGesture;
     }
-    else if (best === 'open' && !awaitingPinchAfterOpen) {
-      targetShape = 'explode';
-      setStoryMode(false);  
-      awaitingPinchAfterOpen = true;  
-    }
-    else if (best === 'pinch' && awaitingPinchAfterOpen) {
-      setStoryMode(true);  
-      enlargeFirstImage();  
-      awaitingPinchAfterOpen = false;  
-    }
-    else if (best === 'ok sign') {
-      targetShape = 'heart';
-      setStoryMode(false);  // This will allow exit only with OK sign
-    }
-    else if (best === 'vsign') { 
-      targetShape = 'logo'; 
-      setStoryMode(false); 
-    }
-  }
-  return currentStableGesture;
-}
 
 
 
