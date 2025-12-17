@@ -865,6 +865,8 @@
       return thumbIndexClose && fingerExtended(12, 10, 9) && fingerExtended(16, 14, 13) && fingerExtended(20, 18, 17);
     }
 
+    // 原始手势检测部分
+    let storyModeStarted = false; // 新增标识，控制 Story Mode 的开始
     function detectGestureStable(lm) {
       const raw = detectGestureRaw(lm);
       if (raw) {
@@ -895,13 +897,35 @@
         currentStableGesture = best;
         lastSwitchTime = now;
 
-        if (best === 'fist') { targetShape = 'tree'; setStoryMode(false); }
-        else if (best === 'open') { targetShape = 'explode'; setStoryMode(true); }
-        else if (best === 'thumbsup') { targetShape = 'heart'; setStoryMode(false); }
-        else if (best === 'vsign') { targetShape = 'logo'; setStoryMode(false); }
-      }
+        if (best === 'fist' && storyMode) { 
+      // 如果进入了 Story Mode，就不能切换到 fist
       return currentStableGesture;
     }
+    else if (best === 'open' && !storyModeStarted) {
+      // 如果是 open 手势，且 Story Mode 尚未启动
+      targetShape = 'explode';
+      setStoryMode(false);  // 不进入 Story Mode
+      storyModeStarted = true;  // 标记为已检测到 open 手势
+    }
+    else if (best === 'pinch' && storyModeStarted) {
+      // 只有在检测到 open 手势后，pinch 手势才有效
+      setStoryMode(true);  // 进入 Story Mode
+      enlargeFirstImage(); // 放大第一张图片的函数
+      storyModeStarted = false;  // 重置标记
+    }
+    else if (best === 'thumbsup') { 
+      targetShape = 'heart'; 
+      setStoryMode(false); 
+      storyModeStarted = false;  // 退出 Story Mode
+    }
+    else if (best === 'vsign') { 
+      targetShape = 'logo'; 
+      setStoryMode(false); 
+      storyModeStarted = false;  // 退出 Story Mode
+    }
+  }
+  return currentStableGesture;
+}
 
 
     function detectGestureRaw(lm) {
