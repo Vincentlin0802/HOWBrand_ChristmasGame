@@ -843,76 +843,62 @@
       return thumbIndexClose && fingerExtended(12, 10, 9) && fingerExtended(16, 14, 13) && fingerExtended(20, 18, 17);
     }
 
-    let isPinching = false;  // 记录 pinch 手势的状态
 
-// 处理 pinch 手势的逻辑
 function handlePinchEvent(lm) {
-    if (!storyMode || !pinchArmed) return;
+      if (!storyMode || !pinchArmed) return;
 
-    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-    const wrist = lm[0];
-    const handScale = Math.max(0.001, dist(wrist, lm[9]));
-    
-    if (handScale < CONFIG.minHandScaleForPinch) { 
-        isPinching = false; 
-        return; 
-    }
+      const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const wrist = lm[0];
+      const handScale = Math.max(0.001, dist(wrist, lm[9]));
+      if (handScale < CONFIG.minHandScaleForPinch) { wasPinched = false; return; }
 
-    const pinchNorm = dist(lm[4], lm[8]) / handScale;
-    const isPinched = pinchNorm < CONFIG.pinchThreshold;
-    const isReleased = pinchNorm > CONFIG.pinchRelease;
-    const now = performance.now();
+      const pinchNorm = dist(lm[4], lm[8]) / handScale;
+      const isPinched = pinchNorm < CONFIG.pinchThreshold;
+      const isReleased = pinchNorm > CONFIG.pinchRelease;
+      const now = performance.now();
 
-    if (!wasPinched && isPinched) {
+      if (!wasPinched && isPinched) {
         if ((now - lastPinchFire) > CONFIG.pinchCooldownMs) {
-            isPinching = true;  // 当 pinch 手势被检测到时，更新状态
-            lastPinchFire = now;
+          showRandomStoryImage();
+          lastPinchFire = now;
         }
         wasPinched = true;
+      }
+      if (wasPinched && isReleased) wasPinched = false;
     }
-    if (wasPinched && isReleased) {
-        isPinching = false;  // pinch 释放时清除状态
-        wasPinched = false;
-    }
-}
 
 // 修改 detectGestureStable 函数，同时检测 "open" 和 "pinch"
 function detectGestureStable(lm) {
-    const raw = detectGestureRaw(lm);
-    if (raw) {
+      const raw = detectGestureRaw(lm);
+      if (raw) {
         gestureQueue.push(raw);
         if (gestureQueue.length > CONFIG.gestureHistory) gestureQueue.shift();
-    } else {
+      } else {
         return currentStableGesture;
-    }
+      }
 
-    const counts = {};
-    for (const g of gestureQueue) counts[g] = (counts[g] || 0) + 1;
+      const counts = {};
+      for (const g of gestureQueue) counts[g] = (counts[g] || 0) + 1;
 
-    let best = null, bestCount = 0;
-    for (const k in counts) {
+      let best = null, bestCount = 0;
+      for (const k in counts) {
         if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
-    }
+      }
 
-    const now = performance.now();
-    const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
+      const now = performance.now();
+      const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
 
-    if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
+      if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
         currentStableGesture = best;
         lastSwitchTime = now;
 
-        // 判断 "open" 和 "pinch" 是否同时发生
-        if (best === 'open' && isPinching) {  // 只有在 open 和 pinch 同时发生时才进入 storyMode
-            targetShape = 'explode';
-            setStoryMode(true);  // 激活故事模式
-        }
-        else if (best === 'fist') { targetShape = 'tree'; setStoryMode(false); }
+        if (best === 'fist') { targetShape = 'tree'; setStoryMode(false); }
+        else if (best === 'open') { targetShape = 'explode'; setStoryMode(true); }
         else if (best === 'thumbsup') { targetShape = 'heart'; setStoryMode(false); }
         else if (best === 'vsign') { targetShape = 'logo'; setStoryMode(false); }
+      }
+      return currentStableGesture;
     }
-    return currentStableGesture;
-}
-
 
 
 
