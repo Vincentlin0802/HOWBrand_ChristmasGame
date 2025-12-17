@@ -986,6 +986,7 @@ function detectGestureStable(lm) {
       requestAnimationFrame(animate);
 
       const dt = Math.min(0.05, clock.getDelta());
+      const time = clock.getElapsedTime(); // 获取运行时间
       const lerp = 0.05;
 
       let source;
@@ -997,10 +998,19 @@ function detectGestureStable(lm) {
       const useVertexColors = (targetShape === 'tree' || targetShape === 'heart' || (targetShape === 'logo' && !!logoTargets));
 
       for (let i = 0; i < CONFIG.particleCount; i++) {
-        const i3 = i * 3;
-        masterPositions[i3]     += (source[i3]     - masterPositions[i3])     * lerp;
-        masterPositions[i3 + 1] += (source[i3 + 1] - masterPositions[i3 + 1]) * lerp;
-        masterPositions[i3 + 2] += (source[i3 + 2] - masterPositions[i3 + 2]) * lerp;
+    const i3 = i * 3;
+    masterPositions[i3]     += (source[i3]     - masterPositions[i3])     * lerp;
+    masterPositions[i3 + 1] += (source[i3 + 1] - masterPositions[i3 + 1]) * lerp;
+    masterPositions[i3 + 2] += (source[i3 + 2] - masterPositions[i3 + 2]) * lerp;
+
+    // 只有在树形模式下增加闪烁
+    if (targetShape === 'tree') {
+        // 如果粒子原本比较亮（装饰灯），则增加波动
+        if (masterColors[i3] > 1.0) { 
+            const flash = 1.0 + 0.5 * Math.sin(time * 5 + i);
+            colArr[j3] = masterColors[i3] * flash; // 这行需要放在下方的 cloud 循环里
+        }
+    }
 
         if (!useVertexColors) {
           masterColors[i3]     += (1 - masterColors[i3]) * 0.05;
@@ -1009,27 +1019,33 @@ function detectGestureStable(lm) {
         }
       }
 
-      for (const cloud of particleClouds) {
-        const posArr = cloud.points.geometry.attributes.position.array;
-        const colArr = cloud.points.geometry.attributes.color.array;
-        const idxArr = cloud.indices;
+      // 渲染优化：在 cloud 循环内应用颜色闪烁
+  for (const cloud of particleClouds) {
+    const posArr = cloud.points.geometry.attributes.position.array;
+    const colArr = cloud.points.geometry.attributes.color.array;
+    const idxArr = cloud.indices;
 
-        for (let j = 0; j < idxArr.length; j++) {
-          const p = idxArr[j];
-          const p3 = p * 3;
-          const j3 = j * 3;
-          posArr[j3]     = masterPositions[p3];
-          posArr[j3 + 1] = masterPositions[p3 + 1];
-          posArr[j3 + 2] = masterPositions[p3 + 2];
-          colArr[j3]     = masterColors[p3];
-          colArr[j3 + 1] = masterColors[p3 + 1];
-          colArr[j3 + 2] = masterColors[p3 + 2];
-        }
-
-        cloud.points.geometry.attributes.position.needsUpdate = true;
-        cloud.points.geometry.attributes.color.needsUpdate = true;
+    for (let j = 0; j < idxArr.length; j++) {
+      const p = idxArr[j];
+      const p3 = p * 3;
+      const j3 = j * 3;
+      posArr[j3] = masterPositions[p3];
+      posArr[j3+1] = masterPositions[p3+1];
+      posArr[j3+2] = masterPositions[p3+2];
+      
+      // 这里的动态闪烁逻辑
+      let flicker = 1.0;
+      if (targetShape === 'tree' && masterColors[p3] > 0.8) {
+          flicker = 1.0 + 0.4 * Math.sin(time * 4 + p);
       }
-
+      
+      colArr[j3]   = masterColors[p3] * flicker;
+      colArr[j3+1] = masterColors[p3+1] * flicker;
+      colArr[j3+2] = masterColors[p3+2] * flicker;
+    }
+    cloud.points.geometry.attributes.position.needsUpdate = true;
+    cloud.points.geometry.attributes.color.needsUpdate = true;
+  }
       if (starMesh) starMesh.visible = (targetShape === 'tree');
       if (starMesh) starMesh.rotation.y += 0.6 * dt;
 
