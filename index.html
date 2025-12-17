@@ -865,65 +865,74 @@
       return thumbIndexClose && fingerExtended(12, 10, 9) && fingerExtended(16, 14, 13) && fingerExtended(20, 18, 17);
     }
 
-    // 原始手势检测部分
-    let storyModeStarted = false; // 新增标识，控制 Story Mode 的开始
-    function detectGestureStable(lm) {
-      const raw = detectGestureRaw(lm);
-      if (raw) {
-        gestureQueue.push(raw);
-        if (gestureQueue.length > CONFIG.gestureHistory) gestureQueue.shift();
-      } else {
-        return currentStableGesture;
-      }
+    let inStoryMode = false;  // 标识是否在 Story Mode 中
+let awaitingPinchAfterOpen = false;  // 标识是否等待 pinch 来进入 Story Mode
 
-      const counts = {};
-      for (const g of gestureQueue) counts[g] = (counts[g] || 0) + 1;
+function detectGestureStable(lm) {
+  const raw = detectGestureRaw(lm);
+  if (raw) {
+    gestureQueue.push(raw);
+    if (gestureQueue.length > CONFIG.gestureHistory) gestureQueue.shift();
+  } else {
+    return currentStableGesture;
+  }
 
-      let best = null, bestCount = 0;
-      for (const k in counts) {
-        if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
-      }
+  const counts = {};
+  for (const g of gestureQueue) counts[g] = (counts[g] || 0) + 1;
 
-      // 说明：pinch 时容易短暂被识别成 fist，这里直接禁止切到 fist。
-      if (storyMode && best === 'fist') {
-        return currentStableGesture;
-      }
-
-
-      const now = performance.now();
-      const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
-
-      if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
-        currentStableGesture = best;
-        lastSwitchTime = now;
-
-        if (best === 'fist' && storyMode) { 
-      // 如果进入了 Story Mode，就不能切换到 fist
-      return currentStableGesture;
-    }
-    else if (best === 'open' && !storyModeStarted) {
-      // 如果是 open 手势，且 Story Mode 尚未启动
-      targetShape = 'explode';
-      setStoryMode(false);  // 不进入 Story Mode
-      storyModeStarted = true;  // 标记为已检测到 open 手势
-    }
-    else if (best === 'pinch' && storyModeStarted) {
-      // 只有在检测到 open 手势后，pinch 手势才有效
-      setStoryMode(true);  // 进入 Story Mode
-      enlargeFirstImage(); // 放大第一张图片的函数
-      storyModeStarted = false;  // 重置标记
-    }
-    else if (best === 'thumbsup') { 
-      targetShape = 'heart'; 
-      setStoryMode(false); 
-      storyModeStarted = false;  // 退出 Story Mode
-    }
-    else if (best === 'vsign') { 
-      targetShape = 'logo'; 
-      setStoryMode(false); 
-      storyModeStarted = false;  // 退出 Story Mode
+  let best = null, bestCount = 0;
+  for (const k in counts) {
+    if (counts[k] > bestCount) {
+      best = k;
+      bestCount = counts[k];
     }
   }
+
+  const now = performance.now();
+  const minVotes = inStoryMode ? CONFIG.storyMinVotesToSwitch : CONFIG.minVotesToSwitch;
+  const cooldown = inStoryMode ? CONFIG.storySwitchCooldownMs : CONFIG.switchCooldownMs;
+  const canSwitch = (now - lastSwitchTime) > cooldown;
+
+  if (best && bestCount >= minVotes && best !== currentStableGesture && canSwitch) {
+    currentStableGesture = best;
+    lastSwitchTime = now;
+
+    // 如果在 Story Mode 中，不允许切换到其他手势
+    if (inStoryMode && best !== 'thumbsup') {  // 允许的退出手势为 thumbsup (OK sign)
+      return currentStableGesture;
+    }
+
+    // 处理 open 手势：如果没有等待 pinch，标记为已检测到 open
+    if (best === 'open' && !awaitingPinchAfterOpen) {
+      targetShape = 'explode';
+      setStoryMode(false);  // 仍然不进入 Story Mode
+      awaitingPinchAfterOpen = true;  // 等待 pinch 手势来进入 Story Mode
+    }
+
+    // 处理 pinch 手势：只有在 open 后才能进入 Story Mode
+    else if (best === 'pinch' && awaitingPinchAfterOpen) {
+      // 在 open 后检测到 pinch，进入 Story Mode
+      setStoryMode(true);
+      enlargeFirstImage(); // 放大第一张图片
+      awaitingPinchAfterOpen = false;  // 重置等待状态
+      inStoryMode = true;  // 设置进入 Story Mode
+    }
+
+    // 处理 thumbsup 手势（OK sign）：退出 Story Mode
+    else if (best === 'thumbsup') {
+      targetShape = 'heart';
+      setStoryMode(false);
+      inStoryMode = false;  // 退出 Story Mode
+      awaitingPinchAfterOpen = false;  // 重置等待状态
+    }
+
+    // 处理 v-sign 手势：可以在任何时候使用，除非在 Story Mode 中
+    else if (best === 'vsign' && !inStoryMode) {
+      targetShape = 'logo';
+      setStoryMode(false);
+    }
+  }
+
   return currentStableGesture;
 }
 
