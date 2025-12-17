@@ -195,16 +195,20 @@
 
     // --------- CONFIG (固定从 assets 读) ----------
     const CONFIG = {
-      particleCount: 6000,
-      particleSize: 0.9,
+      particleCount: 4000,
+      particleSize: 1,
       snowCount: 800,
 
       bloom: { threshold: 0.1, strength: 1.0, radius: 0.5 },
 
-      gestureHistory: 8,
-      minVotesToSwitch: 5,
-      switchCooldownMs: 450,
+      gestureHistory: 10,
+      minVotesToSwitch: 7,
+      switchCooldownMs: 550,
 
+      // Story Mode 下更严格
+      storyMinVotesToSwitch: 9,  // Story mode 需要更高票数
+      storySwitchCooldownMs: 800 // Story mode 切换更慢一点
+      
       pinchThreshold: 0.23,
       pinchRelease: 0.30,
       pinchCooldownMs: 550,
@@ -865,36 +869,45 @@
     }
 
     function detectGestureStable(lm) {
-      const raw = detectGestureRaw(lm);
-      if (raw) {
-        gestureQueue.push(raw);
-        if (gestureQueue.length > CONFIG.gestureHistory) gestureQueue.shift();
-      } else {
-        return currentStableGesture;
-      }
+  const raw = detectGestureRaw(lm);
+  if (raw) {
+    gestureQueue.push(raw);
+    if (gestureQueue.length > CONFIG.gestureHistory) gestureQueue.shift();
+  } else {
+    return currentStableGesture;
+  }
 
-      const counts = {};
-      for (const g of gestureQueue) counts[g] = (counts[g] || 0) + 1;
+  const counts = {};
+  for (const g of gestureQueue) counts[g] = (counts[g] || 0) + 1;
 
-      let best = null, bestCount = 0;
-      for (const k in counts) {
-        if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
-      }
+  let best = null, bestCount = 0;
+  for (const k in counts) {
+    if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
+  }
 
-      const now = performance.now();
-      const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
+  // ✅ 关键修改：Story Mode 下屏蔽 fist 切换
+  // 说明：pinch 时容易短暂被识别成 fist，这里直接禁止切到 fist。
+  if (storyMode && best === 'fist') {
+    return currentStableGesture;
+  }
 
-      if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
-        currentStableGesture = best;
-        lastSwitchTime = now;
+  const now = performance.now();
+  const minVotes = storyMode ? CONFIG.storyMinVotesToSwitch : CONFIG.minVotesToSwitch;
+  const cooldown = storyMode ? CONFIG.storySwitchCooldownMs : CONFIG.switchCooldownMs;
+  const canSwitch = (now - lastSwitchTime) > cooldown;
 
-        if (best === 'fist') { targetShape = 'tree'; setStoryMode(false); }
-        else if (best === 'open') { targetShape = 'explode'; setStoryMode(true); }
-        else if (best === 'thumbsup') { targetShape = 'heart'; setStoryMode(false); }
-        else if (best === 'vsign') { targetShape = 'logo'; setStoryMode(false); }
-      }
-      return currentStableGesture;
-    }
+  if (best && bestCount >= minVotes && best !== currentStableGesture && canSwitch) {
+    currentStableGesture = best;
+    lastSwitchTime = now;
+
+    if (best === 'fist') { targetShape = 'tree'; setStoryMode(false); }
+    else if (best === 'open') { targetShape = 'explode'; setStoryMode(true); }
+    else if (best === 'thumbsup') { targetShape = 'heart'; setStoryMode(false); }
+    else if (best === 'vsign') { targetShape = 'logo'; setStoryMode(false); }
+  }
+  return currentStableGesture;
+}
+
 
     function detectGestureRaw(lm) {
       const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
