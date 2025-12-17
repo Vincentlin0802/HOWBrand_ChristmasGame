@@ -882,6 +882,12 @@
         if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
       }
 
+      // 说明：pinch 时容易短暂被识别成 fist，这里直接禁止切到 fist。
+      if (storyMode && best === 'fist') {
+        return currentStableGesture;
+      }
+
+
       const now = performance.now();
       const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
 
