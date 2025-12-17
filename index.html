@@ -865,10 +865,7 @@
       return thumbIndexClose && fingerExtended(12, 10, 9) && fingerExtended(16, 14, 13) && fingerExtended(20, 18, 17);
     }
 
-    let inStoryMode = false;  // 标识是否在 Story Mode 中
-let awaitingPinchAfterOpen = false;  // 标识是否等待 pinch 手势
-
-function detectGestureStable(lm) {
+    function detectGestureStable(lm) {
   const raw = detectGestureRaw(lm);
   if (raw) {
     gestureQueue.push(raw);
@@ -916,7 +913,7 @@ function detectGestureStable(lm) {
     }
     else if (best === 'ok sign') {
       targetShape = 'heart';
-      setStoryMode(false);
+      setStoryMode(false);  // This will allow exit only with OK sign
     }
     else if (best === 'vsign') { 
       targetShape = 'logo'; 
@@ -925,6 +922,7 @@ function detectGestureStable(lm) {
   }
   return currentStableGesture;
 }
+
 
 
 
