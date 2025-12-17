@@ -641,18 +641,14 @@
   treeTargets = new Float32Array(CONFIG.particleCount * 3);
   const count = CONFIG.particleCount;
 
-  // 定义基础色（稍微提亮，增加饱和度）
-  const cTree = new THREE.Color(0x15803d);  // 亮一点的森林绿
-  const cTrunk = new THREE.Color(0x5c4033); // 明显的木头褐色
-
   for (let i = 0; i < count; i++) {
     const i3 = i * 3;
     
     // ---------------------------------------------------------
-    // 1. 树干部分 (0 - 8%): 适当提亮，增加体积感
+    // 1. 树干部分 (暗色调，不发光)
     // ---------------------------------------------------------
-    if (i < count * 0.08) {
-      const r = Math.random() * 0.7; // 树干稍微加粗
+    if (i < count * 0.1) {
+      const r = Math.random() * 0.5;
       const theta = Math.random() * Math.PI * 2;
       const y = (Math.random() * 4) - 7;
       
@@ -660,66 +656,70 @@
       treeTargets[i3 + 1] = y;
       treeTargets[i3 + 2] = r * Math.sin(theta);
       
-      // 树干亮度调到 0.4-0.6 左右，确保可见
-      masterColors[i3]     = cTrunk.r * 1.2; 
-      masterColors[i3 + 1] = cTrunk.g * 1.2;
-      masterColors[i3 + 2] = cTrunk.b * 1.2;
+      // 树干设为极暗的棕色 (数值远低于 1.0)
+      masterColors[i3]     = 0.15; // R
+      masterColors[i3 + 1] = 0.08; // G
+      masterColors[i3 + 2] = 0.05; // B
     } 
     // ---------------------------------------------------------
-    // 2. 彩灯部分 (8% - 18%): 保持超高亮度，作为视觉焦点
+    // 2. 彩灯部分 (高亮度，触发辉光)
     // ---------------------------------------------------------
-    else if (i < count * 0.18) {
+    else if (i < count * 0.2) {
       const hNorm = Math.pow(Math.random(), 1.2);
       const y = hNorm * 14 - 5;
-      const r = (1 - hNorm) * 6.5; // 最外层，确保灯光在最外面闪烁
+      const r = (1 - hNorm) * 6.4; // 略微外扩，防止被树叶遮挡
       const theta = Math.random() * Math.PI * 2;
       
       treeTargets[i3]     = r * Math.cos(theta);
       treeTargets[i3 + 1] = y;
       treeTargets[i3 + 2] = r * Math.sin(theta);
 
-      // 维持超高亮度 (10+) 触发 Bloom
-      const type = Math.random();
-      if(type > 0.5) {
-        masterColors[i3] = 12; masterColors[i3+1] = 10; masterColors[i3+2] = 2; // 金
+      // 彩灯设为超亮值 (数值远高于 1.0，比如 10.0)
+      // 只有这些点会产生“刺破照片”的强光
+      const rand = Math.random();
+      if (rand > 0.6) {
+        masterColors[i3] = 12.0; masterColors[i3 + 1] = 8.0; masterColors[i3 + 2] = 1.0; // 金光
+      } else if (rand > 0.3) {
+        masterColors[i3] = 12.0; masterColors[i3 + 1] = 0.5; masterColors[i3 + 2] = 0.5; // 红光
       } else {
-        masterColors[i3] = 12; masterColors[i3+1] = 1;  masterColors[i3+2] = 1; // 红
+        masterColors[i3] = 1.0; masterColors[i3 + 1] = 8.0; masterColors[i3 + 2] = 12.0; // 蓝光
       }
     } 
     // ---------------------------------------------------------
-    // 3. 照片挂件 (18% - 30%): 降低比例(从20%降到12%)
+    // 3. 照片粒子 (正常亮度)
     // ---------------------------------------------------------
-    else if (i < count * 0.30) {
+    else if (i < count * 0.4) {
       const hNorm = Math.random();
       const y = hNorm * 14 - 5;
-      const r = (1 - hNorm) * 6.0; // 稍微往里缩一点，让树叶能透出来
+      const r = (1 - hNorm) * 5.8;
       const theta = Math.random() * Math.PI * 2;
       
       treeTargets[i3]     = r * Math.cos(theta);
       treeTargets[i3 + 1] = y;
       treeTargets[i3 + 2] = r * Math.sin(theta);
 
-      masterColors[i3] = 1.0; masterColors[i3 + 1] = 1.0; masterColors[i3 + 2] = 1.0;
+      // 照片设为标准亮度 (1.0)，确保不失真也不过分发光
+      masterColors[i3]     = 1.0;
+      masterColors[i3 + 1] = 1.0;
+      masterColors[i3 + 2] = 1.0;
     } 
     // ---------------------------------------------------------
-    // 4. 树叶部分 (30% - 100%): 增加数量(从60%增加到70%)并提亮
+    // 4. 树叶部分 (深色调，不发光)
     // ---------------------------------------------------------
     else {
       const hNorm = Math.pow(Math.random(), 1.5);
       const y = hNorm * 14 - 5;
-      // 树叶半径随机范围增大，增加蓬松感
-      const r = (1 - hNorm) * 6.2 * Math.sqrt(Math.random()); 
+      const r = (1 - hNorm) * 6 * Math.sqrt(Math.random());
       const theta = Math.random() * Math.PI * 2;
       
       treeTargets[i3]     = r * Math.cos(theta);
       treeTargets[i3 + 1] = y;
       treeTargets[i3 + 2] = r * Math.sin(theta);
 
-      // 树叶亮度提升到 0.6-0.8 之间，确保在照片缝隙中清晰可见
-      const variation = 0.6 + Math.random() * 0.4;
-      masterColors[i3]     = cTree.r * variation;
-      masterColors[i3 + 1] = cTree.g * variation;
-      masterColors[i3 + 2] = cTree.b * variation;
+      // 树叶设为暗绿色 (数值远低于 1.0)
+      masterColors[i3]     = 0.02; // R
+      masterColors[i3 + 1] = 0.25; // G (主要显示绿色)
+      masterColors[i3 + 2] = 0.05; // B
     }
   }
 }
