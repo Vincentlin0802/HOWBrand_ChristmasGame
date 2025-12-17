@@ -205,9 +205,13 @@
       snowCount: 800,
       bloom: { threshold: 0.1, strength: 1.0, radius: 0.5 },
 
-      gestureHistory: 8,
-      minVotesToSwitch: 5,
-      switchCooldownMs: 450,
+      gestureHistory: 10,
+      minVotesToSwitch: 7,
+      switchCooldownMs: 550,
+
+      // Story Mode 下更严格
+      storyMinVotesToSwitch: 9,  // Story mode 需要更高票数
+      storySwitchCooldownMs: 800 // Story mode 切换更慢一点
 
       pinchThreshold: 0.23,
       pinchRelease: 0.30,
@@ -862,10 +866,16 @@
         if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
       }
 
+      if (storyMode && best === 'fist') {
+        return currentStableGesture;
+      }
+      
       const now = performance.now();
-      const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
+      const minVotes = storyMode ? CONFIG.storyMinVotesToSwitch : CONFIG.minVotesToSwitch;
+      const cooldown = storyMode ? CONFIG.storySwitchCooldownMs : CONFIG.switchCooldownMs;
+      const canSwitch = (now - lastSwitchTime) >  cooldown;
 
-      if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
+      if (best && bestCount >= minVotes && best !== currentStableGesture && canSwitch) {
         currentStableGesture = best;
         lastSwitchTime = now;
 
