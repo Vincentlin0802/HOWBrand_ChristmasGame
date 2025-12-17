@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Auto Assets + Upload Brand Logo + Gestures</title>
+  <title>Auto Assets + Brand Logo From Folder + Gesture Help</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -107,6 +107,36 @@
     }
     #story-img-wrap{ flex:1; display:flex; align-items:center; justify-content:center; padding:16px; }
     #story-img{ max-width:100%; max-height:100%; object-fit:contain; border-radius:10px; }
+
+    /* NEW: bottom-left gesture help */
+    #gesture-help{
+      position:absolute;
+      left:16px;
+      bottom:16px;
+      z-index:25;
+      max-width:min(420px, calc(100vw - 220px));
+      background:rgba(0,0,0,.45);
+      border:1px solid rgba(212,175,55,.35);
+      border-radius:12px;
+      padding:10px 12px;
+      color:#fff;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size:12px;
+      line-height:1.45;
+      pointer-events:none;
+      white-space:pre-wrap;
+    }
+    #gesture-help .title{
+      color:#D4AF37;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      margin-bottom:6px;
+      font-size:12px;
+    }
+    #gesture-help .row{ opacity:.92; }
+    #gesture-help .key{ color:#D4AF37; font-weight:700; }
+    #gesture-help .meta{ opacity:.85; margin-top:6px; }
   </style>
 
   <script type="importmap">
@@ -120,11 +150,11 @@
   </script>
 </head>
 <body>
-  <div id="loading">Loading...\n(Run via http://localhost; not file://)</div>
+  <div id="loading">Loading...\n(Run via http://localhost or GitHub Pages; not file://)</div>
 
   <div id="topbar">
     <div id="controls">
-      <button class="btn" id="btn-upload-logo">Upload Brand Logo</button>
+      <button class="btn" id="btn-reload-logo">Reload Brand Logo</button>
       <button class="btn" id="btn-reload-assets">Reload Assets</button>
     </div>
     <div id="hud">Boot...</div>
@@ -144,10 +174,18 @@
     </div>
   </div>
 
+  <div id="gesture-help">
+    <div class="title">Gesture Guide</div>
+    <div class="row"><span class="key">Open Hand</span> → Scatter & Enter Story Mode</div>
+    <div class="row"><span class="key">Fist</span> → Tree</div>
+    <div class="row"><span class="key">Thumbs Up</span> → Heart</div>
+    <div class="row"><span class="key">V Sign</span> → Logo</div>
+    <div class="row"><span class="key">Story Mode</span> → Pinch = Random Story Image · OK-Sign = Exit Zoom</div>
+    <div class="meta" id="gesture-meta">Status: —</div>
+  </div>
+
   <video id="webcam-preview" autoplay playsinline muted></video>
   <div id="canvas-container"></div>
-
-  <input id="logo-file-input" type="file" accept="image/png,image/jpeg" style="display:none" />
 
   <script type="module">
     import * as THREE from 'three';
@@ -183,13 +221,13 @@
       tipBaseUrl: './assets/tip/',
       storyBaseUrl: './assets/story/',
 
-      // default logo path (auto load)
+      // brand logo: ALWAYS from folder (no user upload)
       defaultLogoUrl: './assets/logo/brand_logo.png',
 
       // logo sampling
-      logoSampleStep: 2,            // higher = fewer points, faster
-      logoAlphaThreshold: 40,       // 0-255
-      logoScale: 0.085,             // spatial scaling of logo points
+      logoSampleStep: 2,
+      logoAlphaThreshold: 40,
+      logoScale: 0.085,
       logoYOffset: 2.0
     };
 
@@ -198,9 +236,7 @@
     const loading = document.getElementById('loading');
     const storyOverlay = document.getElementById('story-overlay');
     const storyImg = document.getElementById('story-img');
-
-    const logoInput = document.getElementById('logo-file-input');
-    document.getElementById('btn-upload-logo').addEventListener('click', () => logoInput.click());
+    const gestureMeta = document.getElementById('gesture-meta');
 
     document.getElementById('btn-reload-assets').addEventListener('click', async () => {
       try {
@@ -217,24 +253,18 @@
       }
     });
 
-    logoInput.addEventListener('change', async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+    // NEW: Reload Brand Logo from folder (no upload)
+    document.getElementById('btn-reload-logo').addEventListener('click', async () => {
       try {
         loading.style.display = 'flex';
-        loading.textContent = 'Loading uploaded logo...';
-
-        const tex = await fileToTexture(file);
-        await generateLogoFromTexture(tex);
-
+        loading.textContent = 'Reloading brand logo from folder...';
+        await loadBrandLogoFromFolder();
         loading.style.display = 'none';
         setHUD();
-      } catch (err) {
-        console.error(err);
+      } catch (e) {
+        console.error(e);
         loading.style.display = 'flex';
-        loading.textContent = 'Logo upload failed:\n' + String(err);
-      } finally {
-        e.target.value = '';
+        loading.textContent = 'Brand logo reload failed:\n' + String(e);
       }
     });
 
@@ -278,7 +308,10 @@
         `Counts: [${counts.join(", ")}]\n` +
         `Story: ${storyImages.length}\n` +
         `Logo: ${logoTargets ? 'READY' : '—'}\n` +
-        `Gesture: ${currentStableGesture || '—'}\n`;
+        `Gesture: ${currentStableGesture || '—'}\n` +
+        `StoryMode: ${storyMode}\n`;
+      gestureMeta.textContent =
+        `Status: Gesture=${currentStableGesture || '—'} | StoryMode=${storyMode} | Zoom=${isZoomVisible()} | HandPresent=${handPresentFrames>0}`;
     }
 
     async function init() {
@@ -315,7 +348,7 @@
           masterColors[i3] = 1; masterColors[i3 + 1] = 1; masterColors[i3 + 2] = 1;
         }
 
-        loading.textContent = "Loading manifests + default logo...";
+        loading.textContent = "Loading manifests + brand logo...";
         await autoLoadFromManifestsAndLogo();
 
         if (particleTextures.length < 2) throw new Error("Tip textures must be 2 images via tip_manifest.json");
@@ -337,15 +370,14 @@
         console.error(e);
         loading.textContent =
           "Failed to start.\n\n" +
-          "1) Run via http://localhost (python3 -m http.server 8000)\n" +
+          "1) Run via GitHub Pages / http://localhost\n" +
           "2) Check assets paths & filenames (case sensitive)\n" +
-          "3) Ensure assets/logo/brand_logo.png exists (png with transparency recommended)\n\n" +
+          "3) Ensure assets/logo/brand_logo.png exists\n\n" +
           String(e);
       }
     }
 
     async function autoLoadFromManifestsAndLogo() {
-      // Tip + Story from manifest
       const tipList = await fetchManifest(CONFIG.tipManifestUrl, true);
       const storyList = await fetchManifest(CONFIG.storyManifestUrl, false);
 
@@ -355,13 +387,16 @@
 
       storyImages = storyList.map(n => CONFIG.storyBaseUrl + n);
 
-      // Default logo auto-load
+      await loadBrandLogoFromFolder();
+    }
+
+    // NEW: Always load logo from folder path (no upload)
+    async function loadBrandLogoFromFolder() {
       try {
         const logoTex = await loadTextureFromUrl(CONFIG.defaultLogoUrl);
         await generateLogoFromTexture(logoTex);
       } catch (e) {
-        // fallback: if no logo file, create a simple text logo
-        console.warn('Default logo load failed, using text fallback:', e);
+        console.warn('Brand logo load failed, using text fallback:', e);
         generateLogoFromTextFallback("LOGO");
       }
     }
@@ -402,22 +437,7 @@
       });
     }
 
-    function fileToTexture(file) {
-      return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-          const tex = new THREE.Texture(img);
-          tex.colorSpace = THREE.SRGBColorSpace;
-          configureParticleTexture(tex);
-          resolve(tex);
-        };
-        img.onerror = reject;
-        img.src = URL.createObjectURL(file);
-      });
-    }
-
     async function generateLogoFromTexture(tex) {
-      // sample pixels from image to produce logoTargets
       const img = tex.image;
       if (!img || !img.width || !img.height) throw new Error('Logo texture image not available');
 
@@ -436,19 +456,15 @@
       const step = CONFIG.logoSampleStep;
       const alphaTh = CONFIG.logoAlphaThreshold;
 
-      // collect points where alpha is strong (transparent background recommended)
       for (let y = 0; y < height; y += step) {
         for (let x = 0; x < width; x += step) {
           const a = data[(y * width + x) * 4 + 3];
-          if (a > alphaTh) {
-            pts.push({ x, y });
-          }
+          if (a > alphaTh) pts.push({ x, y });
         }
       }
 
       if (pts.length < 50) throw new Error('Logo image has too few opaque pixels. Use PNG with transparency and clear logo mark.');
 
-      // shuffle points for better distribution
       for (let i = pts.length - 1; i > 0; i--) {
         const j = (Math.random() * (i + 1)) | 0;
         const t = pts[i]; pts[i] = pts[j]; pts[j] = t;
@@ -456,10 +472,8 @@
 
       logoTargets = new Float32Array(CONFIG.particleCount * 3);
 
-      // center to origin
       const cx = width / 2;
       const cy = height / 2;
-
       const s = CONFIG.logoScale;
       const yOff = CONFIG.logoYOffset;
 
@@ -514,7 +528,6 @@
       }
       particleClouds = [];
 
-      // 2 textures => strict 50/50
       const all = new Uint32Array(CONFIG.particleCount);
       for (let i = 0; i < CONFIG.particleCount; i++) all[i] = i;
       shuffleUint32(all);
@@ -575,7 +588,6 @@
       }
     }
 
-    // ===== Shapes =====
     function generateExplodeData() {
       explodeTargets = new Float32Array(CONFIG.particleCount * 3);
       for (let i = 0; i < CONFIG.particleCount; i++) {
@@ -648,7 +660,6 @@
       }
     }
 
-    // ===== Snow/Star =====
     let snowPositions, snowVelocities;
     function createSnow() {
       const geo = new THREE.BufferGeometry();
@@ -676,7 +687,6 @@
       scene.add(starMesh);
     }
 
-    // ===== MediaPipe =====
     async function initMediaPipe() {
       const vision = await FilesetResolver.forVisionTasks(
         'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
@@ -747,7 +757,6 @@
       requestAnimationFrame(processVideo);
     }
 
-    // ===== Story control =====
     function setStoryMode(on) {
       storyMode = on;
       modeBadge.style.display = storyMode ? 'block' : 'none';
@@ -811,7 +820,6 @@
       }
     }
 
-    // ===== OK sign =====
     function detectOKSignRaw(lm) {
       const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
       const wrist = lm[0];
@@ -827,7 +835,6 @@
       return thumbIndexClose && fingerExtended(12, 10, 9) && fingerExtended(16, 14, 13) && fingerExtended(20, 18, 17);
     }
 
-    // ===== Gesture stable =====
     function detectGestureStable(lm) {
       const raw = detectGestureRaw(lm);
       if (raw) {
@@ -908,7 +915,6 @@
       return null;
     }
 
-    // ===== Animation loop =====
     function animate() {
       requestAnimationFrame(animate);
 
