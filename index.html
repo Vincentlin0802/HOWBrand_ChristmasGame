@@ -808,28 +808,6 @@
       requestAnimationFrame(processVideo);
     }
 
-    function handlePinchEvent(lm) {
-      if (!storyMode || !pinchArmed) return;
-
-      const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-      const wrist = lm[0];
-      const handScale = Math.max(0.001, dist(wrist, lm[9]));
-      if (handScale < CONFIG.minHandScaleForPinch) { wasPinched = false; return; }
-
-      const pinchNorm = dist(lm[4], lm[8]) / handScale;
-      const isPinched = pinchNorm < CONFIG.pinchThreshold;
-      const isReleased = pinchNorm > CONFIG.pinchRelease;
-      const now = performance.now();
-
-      if (!wasPinched && isPinched) {
-        if ((now - lastPinchFire) > CONFIG.pinchCooldownMs) {
-          showRandomStoryImage();
-          lastPinchFire = now;
-        }
-        wasPinched = true;
-      }
-      if (wasPinched && isReleased) wasPinched = false;
-    }
 
     function updateOkHold(okNow) {
       const now = performance.now();
