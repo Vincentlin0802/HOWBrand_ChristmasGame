@@ -865,37 +865,76 @@
       return thumbIndexClose && fingerExtended(12, 10, 9) && fingerExtended(16, 14, 13) && fingerExtended(20, 18, 17);
     }
 
-    function detectGestureStable(lm) {
-      const raw = detectGestureRaw(lm);
-      if (raw) {
-        gestureQueue.push(raw);
-        if (gestureQueue.length > CONFIG.gestureHistory) gestureQueue.shift();
-      } else {
-        return currentStableGesture;
-      }
+    let inStoryMode = false;  // 标识是否在 Story Mode 中
+let awaitingPinchAfterOpen = false;  // 标识是否等待 pinch 手势
 
-      const counts = {};
-      for (const g of gestureQueue) counts[g] = (counts[g] || 0) + 1;
+function detectGestureStable(lm) {
+  const raw = detectGestureRaw(lm);
+  if (raw) {
+    gestureQueue.push(raw);
+    if (gestureQueue.length > CONFIG.gestureHistory) gestureQueue.shift();
+  } else {
+    return currentStableGesture;
+  }
 
-      let best = null, bestCount = 0;
-      for (const k in counts) {
-        if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
-      }
+  const counts = {};
+  for (const g of gestureQueue) counts[g] = (counts[g] || 0) + 1;
 
-      const now = performance.now();
-      const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
-
-      if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
-        currentStableGesture = best;
-        lastSwitchTime = now;
-
-        if (best === 'fist') { targetShape = 'tree'; setStoryMode(false); }
-        else if (best === 'open') { targetShape = 'explode'; setStoryMode(true); }
-        else if (best === 'thumbsup') { targetShape = 'heart'; setStoryMode(false); }
-        else if (best === 'vsign') { targetShape = 'logo'; setStoryMode(false); }
-      }
-      return currentStableGesture;
+  let best = null, bestCount = 0;
+  for (const k in counts) {
+    if (counts[k] > bestCount) { 
+      best = k; 
+      bestCount = counts[k]; 
     }
+  }
+
+  const now = performance.now();
+  const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
+
+  // 如果已经在 Story Mode 中，不能切换到其他手势，除非是 OK sign
+  if (inStoryMode && best !== 'ok sign') {
+    return currentStableGesture;  // 在 Story Mode 中只能通过 OK sign 退出
+  }
+
+  if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
+    currentStableGesture = best;
+    lastSwitchTime = now;
+
+    if (best === 'fist') {
+      targetShape = 'tree'; 
+      setStoryMode(false); 
+      inStoryMode = false;  // 退出 Story Mode
+    }
+    else if (best === 'open' && !awaitingPinchAfterOpen) {
+      // 检测到 open 手势，设置为准备进入 Story Mode
+      targetShape = 'explode';
+      setStoryMode(false);  // 进入 open 状态，但不进入 Story Mode
+      awaitingPinchAfterOpen = true;  // 标记已检测到 open，等待 pinch
+    }
+    else if (best === 'pinch' && awaitingPinchAfterOpen) {
+      // 检测到 pinch 手势，进入 Story Mode
+      setStoryMode(true);  // 进入 Story Mode
+      enlargeFirstImage();  // 放大第一张图片
+      awaitingPinchAfterOpen = false;  // 重置
+      inStoryMode = true;  // 设置进入 Story Mode
+    }
+    else if (best === 'ok sign') {
+      // 检测到 OK sign，退出 Story Mode
+      targetShape = 'heart';
+      setStoryMode(false);
+      inStoryMode = false;  // 退出 Story Mode
+      awaitingPinchAfterOpen = false;  // 重置
+    }
+    else if (best === 'vsign') { 
+      targetShape = 'logo'; 
+      setStoryMode(false); 
+      inStoryMode = false;  // 退出 Story Mode
+      awaitingPinchAfterOpen = false;  // 重置
+    }
+  }
+  return currentStableGesture;
+}
+
 
     function detectGestureRaw(lm) {
       const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
