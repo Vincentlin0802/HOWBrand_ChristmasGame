@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Auto Assets + Brand Logo From Folder + Gesture Help</title>
+  <title>HOW Christmas Game — Auto Logo + Gesture Guide</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -47,9 +47,10 @@
       border-radius:12px;
       padding:10px 12px;
       color:#fff;
-      font-size:13px;
-      white-space:pre;
+      font-size:12px;
+      white-space:pre-wrap;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      max-width:min(640px, 92vw);
     }
 
     #mode{
@@ -108,7 +109,6 @@
     #story-img-wrap{ flex:1; display:flex; align-items:center; justify-content:center; padding:16px; }
     #story-img{ max-width:100%; max-height:100%; object-fit:contain; border-radius:10px; }
 
-    /* NEW: bottom-left gesture help */
     #gesture-help{
       position:absolute;
       left:16px;
@@ -150,12 +150,12 @@
   </script>
 </head>
 <body>
-  <div id="loading">Loading...\n(Run via http://localhost or GitHub Pages; not file://)</div>
+  <div id="loading">Loading...</div>
 
   <div id="topbar">
     <div id="controls">
-      <button class="btn" id="btn-reload-logo">Reload Brand Logo</button>
-      <button class="btn" id="btn-reload-assets">Reload Assets</button>
+      <!-- Removed: Reload/Upload Brand Logo -->
+      <button class="btn" id="btn-next-story">Next Story (Debug)</button>
     </div>
     <div id="hud">Boot...</div>
   </div>
@@ -194,11 +194,15 @@
     import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
     import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
+    // ========= CONFIG =========
     const CONFIG = {
-      particleCount: 15000,
-      particleSize: 0.52,
-      snowCount: 800,
+      // (2) total particles -> 10000
+      particleCount: 10000,
 
+      // (3) bigger particles
+      particleSize: 0.78,
+
+      snowCount: 800,
       bloom: { threshold: 0.1, strength: 1.0, radius: 0.5 },
 
       gestureHistory: 8,
@@ -215,18 +219,20 @@
       minHandScaleForPinch: 0.085,
       framesToArmPinch: 6,
 
-      // assets
-      tipManifestUrl: './assets/tip/tip_manifest.json',
-      storyManifestUrl: './assets/story/story_manifest.json',
-      tipBaseUrl: './assets/tip/',
-      storyBaseUrl: './assets/story/',
+      tipA: './assets/tip/tip1.png',
+      tipB: './assets/tip/tip2.png',
 
-      // brand logo: ALWAYS from folder (no user upload)
-      defaultLogoUrl: './assets/logo/brand_logo.png',
+      story: [
+        './assets/story/001.jpg',
+        './assets/story/002.jpg',
+        './assets/story/003.jpg',
+      ],
 
-      // logo sampling
+      brandLogo: './assets/logo/brand_logo.png',
+
       logoSampleStep: 2,
-      logoAlphaThreshold: 40,
+      alphaThreshold: 40,
+      lumaThreshold: 205,
       logoScale: 0.085,
       logoYOffset: 2.0
     };
@@ -238,35 +244,7 @@
     const storyImg = document.getElementById('story-img');
     const gestureMeta = document.getElementById('gesture-meta');
 
-    document.getElementById('btn-reload-assets').addEventListener('click', async () => {
-      try {
-        loading.style.display = 'flex';
-        loading.textContent = 'Reloading assets...';
-        await autoLoadFromManifestsAndLogo();
-        rebuildParticleCloudsBalanced(particleTextures);
-        setHUD();
-        loading.style.display = 'none';
-      } catch (e) {
-        console.error(e);
-        loading.style.display = 'flex';
-        loading.textContent = 'Reload failed:\n' + String(e);
-      }
-    });
-
-    // NEW: Reload Brand Logo from folder (no upload)
-    document.getElementById('btn-reload-logo').addEventListener('click', async () => {
-      try {
-        loading.style.display = 'flex';
-        loading.textContent = 'Reloading brand logo from folder...';
-        await loadBrandLogoFromFolder();
-        loading.style.display = 'none';
-        setHUD();
-      } catch (e) {
-        console.error(e);
-        loading.style.display = 'flex';
-        loading.textContent = 'Brand logo reload failed:\n' + String(e);
-      }
-    });
+    document.getElementById('btn-next-story').addEventListener('click', () => showRandomStoryImage());
 
     let scene, camera, renderer, composer;
     let handLandmarker;
@@ -279,7 +257,7 @@
     let treeTargets, heartTargets, logoTargets, explodeTargets;
 
     let storyMode = false;
-    let storyImages = [];
+    const storyImages = CONFIG.story.slice();
     let lastStoryIndex = -1;
 
     let wasPinched = false;
@@ -298,18 +276,21 @@
     let particleClouds = [];
     let particleTextures = [];
 
+    let logoStatus = 'INIT';
+    let logoResolvedUrl = '';
+
     const clock = new THREE.Clock();
 
-    function setHUD() {
-      const counts = particleClouds.map(c => c.count);
+    function setHUD(extra='') {
       hud.textContent =
-        `Textures: ${particleTextures.length}\n` +
-        `Clouds: ${particleClouds.length}\n` +
-        `Counts: [${counts.join(", ")}]\n` +
+        `Particles: ${CONFIG.particleCount} | Size: ${CONFIG.particleSize}\n` +
+        `BrandLogo: ${logoResolvedUrl || '(resolving...)'}\n` +
+        `LogoStatus: ${logoStatus}\n` +
+        `LogoTargets: ${logoTargets ? 'READY' : '—'}\n` +
         `Story: ${storyImages.length}\n` +
-        `Logo: ${logoTargets ? 'READY' : '—'}\n` +
-        `Gesture: ${currentStableGesture || '—'}\n` +
-        `StoryMode: ${storyMode}\n`;
+        `Gesture: ${currentStableGesture || '—'} | StoryMode=${storyMode} | Zoom=${isZoomVisible()}\n` +
+        (extra ? `\n${extra}\n` : '');
+
       gestureMeta.textContent =
         `Status: Gesture=${currentStableGesture || '—'} | StoryMode=${storyMode} | Zoom=${isZoomVisible()} | HandPresent=${handPresentFrames>0}`;
     }
@@ -348,10 +329,14 @@
           masterColors[i3] = 1; masterColors[i3 + 1] = 1; masterColors[i3 + 2] = 1;
         }
 
-        loading.textContent = "Loading manifests + brand logo...";
-        await autoLoadFromManifestsAndLogo();
+        loading.textContent = "Loading tip textures...";
+        particleTextures = [
+          await loadTextureFromUrl(CONFIG.tipA),
+          await loadTextureFromUrl(CONFIG.tipB),
+        ];
 
-        if (particleTextures.length < 2) throw new Error("Tip textures must be 2 images via tip_manifest.json");
+        loading.textContent = "Loading brand logo...";
+        await loadBrandLogoFromFolder(true);
 
         rebuildParticleCloudsBalanced(particleTextures);
         createSnow();
@@ -368,51 +353,18 @@
 
       } catch (e) {
         console.error(e);
+        loading.style.display = 'flex';
         loading.textContent =
           "Failed to start.\n\n" +
-          "1) Run via GitHub Pages / http://localhost\n" +
-          "2) Check assets paths & filenames (case sensitive)\n" +
-          "3) Ensure assets/logo/brand_logo.png exists\n\n" +
-          String(e);
+          String(e) + "\n\n" +
+          "Check:\n" +
+          "- assets/logo/brand_logo.png exists (case sensitive)\n" +
+          "- assets/tip/tip1.png and tip2.png exist\n" +
+          "- story paths exist (or remove them)\n";
       }
     }
 
-    async function autoLoadFromManifestsAndLogo() {
-      const tipList = await fetchManifest(CONFIG.tipManifestUrl, true);
-      const storyList = await fetchManifest(CONFIG.storyManifestUrl, false);
-
-      const texA = await loadTextureFromUrl(CONFIG.tipBaseUrl + tipList[0]);
-      const texB = await loadTextureFromUrl(CONFIG.tipBaseUrl + tipList[1]);
-      particleTextures = [texA, texB];
-
-      storyImages = storyList.map(n => CONFIG.storyBaseUrl + n);
-
-      await loadBrandLogoFromFolder();
-    }
-
-    // NEW: Always load logo from folder path (no upload)
-    async function loadBrandLogoFromFolder() {
-      try {
-        const logoTex = await loadTextureFromUrl(CONFIG.defaultLogoUrl);
-        await generateLogoFromTexture(logoTex);
-      } catch (e) {
-        console.warn('Brand logo load failed, using text fallback:', e);
-        generateLogoFromTextFallback("LOGO");
-      }
-    }
-
-    async function fetchManifest(url, require2) {
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`Manifest fetch failed: ${url}`);
-      const json = await res.json();
-      const arr = Array.isArray(json?.images) ? json.images : [];
-      const out = arr.filter(x => typeof x === 'string' && x.length > 0);
-      if (require2 && out.length < 2) throw new Error(`Manifest needs >=2 images: ${url}`);
-      if (!require2 && out.length === 0) throw new Error(`Empty manifest: ${url}`);
-      return out;
-    }
-
-    function configureParticleTexture(tex) {
+    function configureTexture(tex) {
       tex.wrapS = THREE.ClampToEdgeWrapping;
       tex.wrapT = THREE.ClampToEdgeWrapping;
       tex.minFilter = THREE.LinearFilter;
@@ -422,48 +374,116 @@
       tex.needsUpdate = true;
     }
 
-    function loadTextureFromUrl(url) {
+    function resolveUrl(rel) { return new URL(rel, window.location.href).href; }
+
+    function cacheBust(url) {
+      const u = new URL(url);
+      u.searchParams.set('v', String(Date.now()));
+      return u.href;
+    }
+
+    function loadTextureFromUrl(relOrAbs) {
+      const abs = resolveUrl(relOrAbs);
       return new Promise((resolve, reject) => {
         const img = new Image();
         img.crossOrigin = "anonymous";
+        img.decoding = "async";
         img.onload = () => {
           const tex = new THREE.Texture(img);
           tex.colorSpace = THREE.SRGBColorSpace;
-          configureParticleTexture(tex);
+          configureTexture(tex);
           resolve(tex);
         };
-        img.onerror = () => reject(new Error("Texture load failed: " + url));
-        img.src = url;
+        img.onerror = () => reject(new Error("Texture load failed:\n" + abs));
+        img.src = abs;
       });
     }
 
-    async function generateLogoFromTexture(tex) {
+    async function loadBrandLogoFromFolder(forceBust=false) {
+      try {
+        logoStatus = 'LOADING';
+        const abs = resolveUrl(CONFIG.brandLogo);
+        logoResolvedUrl = forceBust ? cacheBust(abs) : abs;
+        setHUD('Loading logo...');
+
+        const tex = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.decoding = "async";
+          img.onload = () => {
+            const t = new THREE.Texture(img);
+            t.colorSpace = THREE.SRGBColorSpace;
+            configureTexture(t);
+            resolve(t);
+          };
+          img.onerror = () => reject(new Error("Brand logo load failed:\n" + logoResolvedUrl));
+          img.src = logoResolvedUrl;
+        });
+
+        await generateLogoFromTextureSmart(tex);
+        logoStatus = 'READY';
+        setHUD('Logo ready (V Sign).');
+      } catch (e) {
+        console.warn(e);
+        logoStatus = 'FALLBACK';
+        generateLogoFromTextFallback("LOGO");
+        setHUD('Logo fallback used. Check brand_logo.png path/case.');
+      }
+    }
+
+    async function generateLogoFromTextureSmart(tex) {
       const img = tex.image;
-      if (!img || !img.width || !img.height) throw new Error('Logo texture image not available');
+      if (!img || !img.width || !img.height) throw new Error('Logo image not available');
 
       const canvas = document.createElement('canvas');
-      const maxW = 512;
+      const maxW = 640;
       const scale = Math.min(1, maxW / img.width);
       canvas.width = Math.max(1, Math.floor(img.width * scale));
       canvas.height = Math.max(1, Math.floor(img.height * scale));
+
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
+      let hasMeaningfulAlpha = false;
+      for (let i = 3; i < data.length; i += 4 * 60) {
+        if (data[i] < 250) { hasMeaningfulAlpha = true; break; }
+      }
+
       const pts = [];
       const step = CONFIG.logoSampleStep;
-      const alphaTh = CONFIG.logoAlphaThreshold;
+      const aTh = CONFIG.alphaThreshold;
+      const lTh = CONFIG.lumaThreshold;
 
       for (let y = 0; y < height; y += step) {
         for (let x = 0; x < width; x += step) {
-          const a = data[(y * width + x) * 4 + 3];
-          if (a > alphaTh) pts.push({ x, y });
+          const k = (y * width + x) * 4;
+          const r = data[k], g = data[k+1], b = data[k+2], a = data[k+3];
+
+          if (hasMeaningfulAlpha) {
+            if (a > aTh) pts.push({x,y});
+          } else {
+            const luma = 0.2126*r + 0.7152*g + 0.0722*b;
+            if (luma < lTh) pts.push({x,y});
+          }
         }
       }
 
-      if (pts.length < 50) throw new Error('Logo image has too few opaque pixels. Use PNG with transparency and clear logo mark.');
+      if (pts.length < 120 && !hasMeaningfulAlpha) {
+        pts.length = 0;
+        for (let y = 0; y < height; y += step) {
+          for (let x = 0; x < width; x += step) {
+            const k = (y * width + x) * 4;
+            const r = data[k], g = data[k+1], b = data[k+2];
+            const luma = 0.2126*r + 0.7152*g + 0.0722*b;
+            if (luma > 255 - lTh) pts.push({x,y});
+          }
+        }
+      }
+
+      if (pts.length < 120) throw new Error(`Logo sampling found too few points (${pts.length}).`);
 
       for (let i = pts.length - 1; i > 0; i--) {
         const j = (Math.random() * (i + 1)) | 0;
@@ -471,30 +491,24 @@
       }
 
       logoTargets = new Float32Array(CONFIG.particleCount * 3);
-
-      const cx = width / 2;
-      const cy = height / 2;
-      const s = CONFIG.logoScale;
-      const yOff = CONFIG.logoYOffset;
+      const cx = width/2, cy = height/2;
+      const s = CONFIG.logoScale, yOff = CONFIG.logoYOffset;
 
       for (let i = 0; i < CONFIG.particleCount; i++) {
         const p = pts[i % pts.length];
-        const px = (p.x - cx) * s;
-        const py = -(p.y - cy) * s;
-
-        logoTargets[i * 3] = px;
-        logoTargets[i * 3 + 1] = py + yOff;
-        logoTargets[i * 3 + 2] = 0;
+        logoTargets[i*3] = (p.x - cx) * s;
+        logoTargets[i*3 + 1] = -(p.y - cy) * s + yOff;
+        logoTargets[i*3 + 2] = 0;
       }
     }
 
     function generateLogoFromTextFallback(text) {
       const canvas = document.createElement('canvas');
-      canvas.width = 400; canvas.height = 140;
+      canvas.width = 420; canvas.height = 160;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#fff';
-      ctx.font = 'bold 80px "Cinzel"';
+      ctx.font = 'bold 90px "Cinzel"';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(text, canvas.width / 2, canvas.height / 2);
@@ -509,14 +523,14 @@
       }
 
       logoTargets = new Float32Array(CONFIG.particleCount * 3);
-      const cx = width / 2, cy = height / 2;
+      const cx = width/2, cy = height/2;
       const s = 0.08, yOff = 2.0;
 
       for (let i = 0; i < CONFIG.particleCount; i++) {
         const p = pts[i % pts.length] || { x: cx, y: cy };
-        logoTargets[i * 3] = (p.x - cx) * s;
-        logoTargets[i * 3 + 1] = -(p.y - cy) * s + yOff;
-        logoTargets[i * 3 + 2] = 0;
+        logoTargets[i*3] = (p.x - cx) * s;
+        logoTargets[i*3 + 1] = -(p.y - cy) * s + yOff;
+        logoTargets[i*3 + 2] = 0;
       }
     }
 
@@ -530,7 +544,10 @@
 
       const all = new Uint32Array(CONFIG.particleCount);
       for (let i = 0; i < CONFIG.particleCount; i++) all[i] = i;
-      shuffleUint32(all);
+      for (let i = all.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        const tmp = all[i]; all[i] = all[j]; all[j] = tmp;
+      }
 
       const half = Math.floor(CONFIG.particleCount / 2);
       const sizes = [CONFIG.particleCount - half, half];
@@ -578,13 +595,6 @@
         const points = new THREE.Points(geometry, material);
         scene.add(points);
         particleClouds.push({ points, indices: idxArr, count });
-      }
-    }
-
-    function shuffleUint32(arr) {
-      for (let i = arr.length - 1; i > 0; i--) {
-        const j = (Math.random() * (i + 1)) | 0;
-        const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
       }
     }
 
@@ -715,6 +725,27 @@
       processVideo();
     }
 
+    function isZoomVisible() { return storyOverlay.style.display === 'flex'; }
+    function exitZoomOnly() { storyOverlay.style.display = 'none'; }
+
+    function showRandomStoryImage() {
+      if (!storyImages.length) return;
+      let idx = Math.floor(Math.random() * storyImages.length);
+      if (storyImages.length > 1 && idx === lastStoryIndex) idx = (idx + 1) % storyImages.length;
+      lastStoryIndex = idx;
+      storyImg.src = resolveUrl(storyImages[idx]);
+      storyOverlay.style.display = 'flex';
+    }
+
+    function setStoryMode(on) {
+      storyMode = on;
+      modeBadge.style.display = storyMode ? 'block' : 'none';
+      if (!storyMode) storyOverlay.style.display = 'none';
+      handPresentFrames = 0;
+      pinchArmed = false;
+      wasPinched = false;
+    }
+
     let lastVideoTime = -1;
     function processVideo() {
       const video = document.getElementById('webcam-preview');
@@ -755,27 +786,6 @@
         }
       }
       requestAnimationFrame(processVideo);
-    }
-
-    function setStoryMode(on) {
-      storyMode = on;
-      modeBadge.style.display = storyMode ? 'block' : 'none';
-      if (!storyMode) storyOverlay.style.display = 'none';
-      handPresentFrames = 0;
-      pinchArmed = false;
-      wasPinched = false;
-    }
-
-    function isZoomVisible() { return storyOverlay.style.display === 'flex'; }
-    function exitZoomOnly() { storyOverlay.style.display = 'none'; }
-
-    function showRandomStoryImage() {
-      if (!storyImages.length) return;
-      let idx = Math.floor(Math.random() * storyImages.length);
-      if (storyImages.length > 1 && idx === lastStoryIndex) idx = (idx + 1) % storyImages.length;
-      lastStoryIndex = idx;
-      storyImg.src = storyImages[idx];
-      storyOverlay.style.display = 'flex';
     }
 
     function handlePinchEvent(lm) {
