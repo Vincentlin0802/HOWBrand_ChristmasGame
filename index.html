@@ -154,7 +154,7 @@
 
   <div id="topbar">
     <div id="controls">
-      <!-- Removed: Reload/Upload Brand Logo -->
+      <button class="btn" id="btn-reload-logo">Reload Brand Logo</button>
       <button class="btn" id="btn-next-story">Next Story (Debug)</button>
     </div>
     <div id="hud">Boot...</div>
@@ -194,24 +194,17 @@
     import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
     import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
-    // ========= CONFIG =========
+    // --------- CONFIG (固定从 assets 读) ----------
     const CONFIG = {
-      // (2) total particles -> 10000
-      particleCount: 10000,
-
-      // (3) bigger particles
-      particleSize: 0.78,
-
+      particleCount: 15000,
+      particleSize: 0.52,
       snowCount: 800,
+
       bloom: { threshold: 0.1, strength: 1.0, radius: 0.5 },
 
-      gestureHistory: 10,
-      minVotesToSwitch: 7,
-      switchCooldownMs: 550,
-
-      // Story Mode 下更严格
-      storyMinVotesToSwitch: 9,  // Story mode 需要更高票数
-      storySwitchCooldownMs: 800 // Story mode 切换更慢一点
+      gestureHistory: 8,
+      minVotesToSwitch: 5,
+      switchCooldownMs: 450,
 
       pinchThreshold: 0.23,
       pinchRelease: 0.30,
@@ -223,20 +216,24 @@
       minHandScaleForPinch: 0.085,
       framesToArmPinch: 6,
 
+      // 两张 tip（你也可以改成 manifest 方式，但这里先写死更稳）
       tipA: './assets/tip/tip1.png',
       tipB: './assets/tip/tip2.png',
 
+      // story 写死（你可自行加）
       story: [
         './assets/story/001.jpg',
         './assets/story/002.jpg',
         './assets/story/003.jpg',
       ],
 
+      // brand logo 固定路径（按钮只是 reload）
       brandLogo: './assets/logo/brand_logo.png',
 
+      // logo sampling: 支持 PNG 透明 / JPG 无透明（亮度阈值）
       logoSampleStep: 2,
-      alphaThreshold: 40,
-      lumaThreshold: 205,
+      alphaThreshold: 40,      // PNG 有透明时用
+      lumaThreshold: 205,      // JPG/无透明时用（越小越“吃底色”）
       logoScale: 0.085,
       logoYOffset: 2.0
     };
@@ -249,6 +246,19 @@
     const gestureMeta = document.getElementById('gesture-meta');
 
     document.getElementById('btn-next-story').addEventListener('click', () => showRandomStoryImage());
+    document.getElementById('btn-reload-logo').addEventListener('click', async () => {
+      try {
+        loading.style.display = 'flex';
+        loading.textContent = 'Reloading brand logo...';
+        await loadBrandLogoFromFolder(true);
+        loading.style.display = 'none';
+        setHUD();
+      } catch (e) {
+        console.error(e);
+        loading.style.display = 'flex';
+        loading.textContent = 'Brand logo reload failed:\n' + String(e);
+      }
+    });
 
     let scene, camera, renderer, composer;
     let handLandmarker;
@@ -287,7 +297,7 @@
 
     function setHUD(extra='') {
       hud.textContent =
-        `Particles: ${CONFIG.particleCount} | Size: ${CONFIG.particleSize}\n` +
+        `Page: ${location.href}\n` +
         `BrandLogo: ${logoResolvedUrl || '(resolving...)'}\n` +
         `LogoStatus: ${logoStatus}\n` +
         `LogoTargets: ${logoTargets ? 'READY' : '—'}\n` +
@@ -339,7 +349,7 @@
           await loadTextureFromUrl(CONFIG.tipB),
         ];
 
-        loading.textContent = "Loading brand logo...";
+        loading.textContent = "Loading brand logo from folder...";
         await loadBrandLogoFromFolder(true);
 
         rebuildParticleCloudsBalanced(particleTextures);
@@ -362,12 +372,12 @@
           "Failed to start.\n\n" +
           String(e) + "\n\n" +
           "Check:\n" +
-          "- assets/logo/brand_logo.png exists (case sensitive)\n" +
-          "- assets/tip/tip1.png and tip2.png exist\n" +
-          "- story paths exist (or remove them)\n";
+          "- assets/logo/brand_logo.png exists and filename case matches.\n" +
+          "- Tip files exist.\n";
       }
     }
 
+    // --------- texture load ----------
     function configureTexture(tex) {
       tex.wrapS = THREE.ClampToEdgeWrapping;
       tex.wrapT = THREE.ClampToEdgeWrapping;
@@ -378,7 +388,9 @@
       tex.needsUpdate = true;
     }
 
-    function resolveUrl(rel) { return new URL(rel, window.location.href).href; }
+    function resolveUrl(rel) {
+      return new URL(rel, window.location.href).href;
+    }
 
     function cacheBust(url) {
       const u = new URL(url);
@@ -390,6 +402,7 @@
       const abs = resolveUrl(relOrAbs);
       return new Promise((resolve, reject) => {
         const img = new Image();
+        // GitHub Pages 上通常没问题；如果你换域名，anonymous 也安全
         img.crossOrigin = "anonymous";
         img.decoding = "async";
         img.onload = () => {
@@ -403,6 +416,7 @@
       });
     }
 
+    // --------- BRAND LOGO from folder ----------
     async function loadBrandLogoFromFolder(forceBust=false) {
       try {
         logoStatus = 'LOADING';
@@ -426,15 +440,16 @@
 
         await generateLogoFromTextureSmart(tex);
         logoStatus = 'READY';
-        setHUD('Logo ready (V Sign).');
+        setHUD('Logo ready (V Sign to view).');
       } catch (e) {
         console.warn(e);
         logoStatus = 'FALLBACK';
         generateLogoFromTextFallback("LOGO");
-        setHUD('Logo fallback used. Check brand_logo.png path/case.');
+        setHUD('Logo fallback used. Check path/case or logo format.');
       }
     }
 
+    // NEW: 支持透明 PNG / 非透明 JPG（用亮度阈值）
     async function generateLogoFromTextureSmart(tex) {
       const img = tex.image;
       if (!img || !img.width || !img.height) throw new Error('Logo image not available');
@@ -452,6 +467,7 @@
       const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
       let hasMeaningfulAlpha = false;
+      // quick scan: if any alpha < 250, treat as transparent logo
       for (let i = 3; i < data.length; i += 4 * 60) {
         if (data[i] < 250) { hasMeaningfulAlpha = true; break; }
       }
@@ -469,26 +485,32 @@
           if (hasMeaningfulAlpha) {
             if (a > aTh) pts.push({x,y});
           } else {
+            // use brightness threshold (assume logo is darker on light bg OR vice versa)
             const luma = 0.2126*r + 0.7152*g + 0.0722*b;
+            // pick "non-white" pixels by default
             if (luma < lTh) pts.push({x,y});
           }
         }
       }
 
-      if (pts.length < 120 && !hasMeaningfulAlpha) {
-        pts.length = 0;
-        for (let y = 0; y < height; y += step) {
-          for (let x = 0; x < width; x += step) {
-            const k = (y * width + x) * 4;
-            const r = data[k], g = data[k+1], b = data[k+2];
-            const luma = 0.2126*r + 0.7152*g + 0.0722*b;
-            if (luma > 255 - lTh) pts.push({x,y});
+      if (pts.length < 120) {
+        // fallback: try inverse (logo white on dark bg)
+        if (!hasMeaningfulAlpha) {
+          pts.length = 0;
+          for (let y = 0; y < height; y += step) {
+            for (let x = 0; x < width; x += step) {
+              const k = (y * width + x) * 4;
+              const r = data[k], g = data[k+1], b = data[k+2];
+              const luma = 0.2126*r + 0.7152*g + 0.0722*b;
+              if (luma > 255 - lTh) pts.push({x,y});
+            }
           }
         }
       }
 
       if (pts.length < 120) throw new Error(`Logo sampling found too few points (${pts.length}).`);
 
+      // shuffle
       for (let i = pts.length - 1; i > 0; i--) {
         const j = (Math.random() * (i + 1)) | 0;
         const t = pts[i]; pts[i] = pts[j]; pts[j] = t;
@@ -538,6 +560,7 @@
       }
     }
 
+    // --------- particles 50/50 ----------
     function rebuildParticleCloudsBalanced(textures) {
       for (const c of particleClouds) {
         scene.remove(c.points);
@@ -602,6 +625,7 @@
       }
     }
 
+    // --------- shapes ----------
     function generateExplodeData() {
       explodeTargets = new Float32Array(CONFIG.particleCount * 3);
       for (let i = 0; i < CONFIG.particleCount; i++) {
@@ -674,6 +698,7 @@
       }
     }
 
+    // --------- snow/star ----------
     let snowPositions, snowVelocities;
     function createSnow() {
       const geo = new THREE.BufferGeometry();
@@ -701,6 +726,7 @@
       scene.add(starMesh);
     }
 
+    // --------- mediapipe ----------
     async function initMediaPipe() {
       const vision = await FilesetResolver.forVisionTasks(
         'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
@@ -729,6 +755,7 @@
       processVideo();
     }
 
+    // --------- story ----------
     function isZoomVisible() { return storyOverlay.style.display === 'flex'; }
     function exitZoomOnly() { storyOverlay.style.display = 'none'; }
 
@@ -750,6 +777,7 @@
       wasPinched = false;
     }
 
+    // --------- gesture loop ----------
     let lastVideoTime = -1;
     function processVideo() {
       const video = document.getElementById('webcam-preview');
@@ -866,16 +894,10 @@
         if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
       }
 
-      if (storyMode && best === 'fist') {
-        return currentStableGesture;
-      }
-      
       const now = performance.now();
-      const minVotes = storyMode ? CONFIG.storyMinVotesToSwitch : CONFIG.minVotesToSwitch;
-      const cooldown = storyMode ? CONFIG.storySwitchCooldownMs : CONFIG.switchCooldownMs;
-      const canSwitch = (now - lastSwitchTime) >  cooldown;
+      const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
 
-      if (best && bestCount >= minVotes && best !== currentStableGesture && canSwitch) {
+      if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
         currentStableGesture = best;
         lastSwitchTime = now;
 
@@ -935,6 +957,7 @@
       return null;
     }
 
+    // --------- render loop ----------
     function animate() {
       requestAnimationFrame(animate);
 
