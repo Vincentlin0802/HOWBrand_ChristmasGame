@@ -312,7 +312,7 @@
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
         const renderScene = new RenderPass(scene, camera);
-        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.95);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.6, 0.4, 0.85);
         bloomPass.threshold = CONFIG.bloom.threshold;
         bloomPass.strength = CONFIG.bloom.strength;
         bloomPass.radius = CONFIG.bloom.radius;
@@ -403,18 +403,6 @@
         img.src = abs;
       });
     }
-    function createCircleTexture(color = '#ffffff', blur = false) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 64; canvas.height = 64;
-  const ctx = canvas.getContext('2d');
-  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-  gradient.addColorStop(0, color);
-  gradient.addColorStop(blur ? 1 : 0.5, 'transparent');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 64, 64);
-  const tex = new THREE.CanvasTexture(canvas);
-  return tex;
-}
 
     // --------- BRAND LOGO from folder ----------
     async function loadBrandLogoFromFolder(forceBust=false) {
@@ -561,68 +549,69 @@
     }
 
     // --------- particles 50/50 ----------
-    function rebuildParticleClouds(photoTextures) {
-  // 1. 清理旧的组
-  for (const c of particleClouds) {
-    scene.remove(c.points);
-    c.points.geometry.dispose();
-    c.points.material.dispose();
-  }
-  particleClouds = [];
+    function rebuildParticleCloudsBalanced(textures) {
+      for (const c of particleClouds) {
+        scene.remove(c.points);
+        c.points.geometry.dispose();
+        c.points.material.dispose();
+      }
+      particleClouds = [];
 
-  // 2. 定义纹理池
-  const textures = {
-    trunk: createCircleTexture('#4B3621', false), // 树干用实心圆
-    light: createCircleTexture('#ffffff', true),  // 彩灯用发光圆
-    leaf:  createCircleTexture('#0B6623', true),  // 树叶用柔和圆
-    photoA: photoTextures[0],
-    photoB: photoTextures[1]
-  };
+      const all = new Uint32Array(CONFIG.particleCount);
+      for (let i = 0; i < CONFIG.particleCount; i++) all[i] = i;
+      for (let i = all.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        const tmp = all[i]; all[i] = all[j]; all[j] = tmp;
+      }
 
-  // 3. 定义粒子的分配规则 (必须与 generateTreeData 中的 i 范围一致)
-  const count = CONFIG.particleCount;
-  const groups = [
-    { name: 'trunk', range: [0, count * 0.1], tex: textures.trunk, size: 0.8 },
-    { name: 'lights', range: [count * 0.1, count * 0.2], tex: textures.light, size: 1.2 },
-    { name: 'photos', range: [count * 0.2, count * 0.4], tex: null, size: 1.2 }, // 特殊处理照片
-    { name: 'leaves', range: [count * 0.4, count], tex: textures.leaf, size: 1.0 }
-  ];
+      const half = Math.floor(CONFIG.particleCount / 2);
+      const sizes = [CONFIG.particleCount - half, half];
 
-  groups.forEach(group => {
-    const start = Math.floor(group.range[0]);
-    const end = Math.floor(group.range[1]);
-    const num = end - start;
-    if (num <= 0) return;
+      let cursor = 0;
+      const groups = sizes.map(sz => {
+        const sub = new Uint32Array(sz);
+        for (let i = 0; i < sz; i++) sub[i] = all[cursor++];
+        return sub;
+      });
 
-    const idxArr = new Uint32Array(num);
-    for (let i = 0; i < num; i++) idxArr[i] = start + i;
+      for (let g = 0; g < 2; g++) {
+        const idxArr = groups[g];
+        const count = idxArr.length;
 
-    // 处理照片交替纹理
-    let finalTex = group.tex;
-    if (group.name === 'photos') {
-      // 这里的逻辑可以更复杂，目前简单演示
-      finalTex = textures.photoA; 
+        const positions = new Float32Array(count * 3);
+        const colors = new Float32Array(count * 3);
+
+        for (let j = 0; j < count; j++) {
+          const p = idxArr[j];
+          const p3 = p * 3;
+          const j3 = j * 3;
+          positions[j3] = masterPositions[p3];
+          positions[j3 + 1] = masterPositions[p3 + 1];
+          positions[j3 + 2] = masterPositions[p3 + 2];
+          colors[j3] = masterColors[p3];
+          colors[j3 + 1] = masterColors[p3 + 1];
+          colors[j3 + 2] = masterColors[p3 + 2];
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.PointsMaterial({
+          size: CONFIG.particleSize,
+          vertexColors: true,
+          map: textures[g],
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          alphaTest: 0.01
+        });
+
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+        particleClouds.push({ points, indices: idxArr, count });
+      }
     }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(num * 3), 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(num * 3), 3));
-
-    const material = new THREE.PointsMaterial({
-      size: group.size || CONFIG.particleSize,
-      vertexColors: true,
-      map: finalTex,
-      transparent: true,
-      depthWrite: false,
-      blending: group.name === 'lights' ? THREE.AdditiveBlending : THREE.NormalBlending,
-      alphaTest: 0.01
-    });
-
-    const points = new THREE.Points(geometry, material);
-    scene.add(points);
-    particleClouds.push({ points, indices: idxArr, count: num });
-  });
-}
 
     // --------- shapes ----------
     function generateExplodeData() {
@@ -639,92 +628,52 @@
 
     function generateTreeData() {
   treeTargets = new Float32Array(CONFIG.particleCount * 3);
-  // 注意：确保你的 masterColors 在外部已定义，或者是如下面这样直接操作全局数组
-  const count = CONFIG.particleCount;
-  const cTree = new THREE.Color(0x0B6623); // 树叶深绿基础色
-  const cTrunk = new THREE.Color(0x4B3621); // 树干深褐色
+  const cTree = new THREE.Color(0x0B6623); // 树叶深绿
+  const cTrunk = new THREE.Color(0x4B3621); // 树干深褐
 
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < CONFIG.particleCount; i++) {
     const i3 = i * 3;
     
-    // ---------------------------------------------------------
-    // 1. 树干逻辑 (前 10% 的粒子: 0 - 0.1)
-    // ---------------------------------------------------------
-    if (i < count * 0.1) {
-      const r = Math.random() * 0.6; // 树干半径
+    // 1. 树干逻辑
+    if (i < CONFIG.particleCount * 0.1) {
+      const r = Math.random() * 0.6;
       const theta = Math.random() * Math.PI * 2;
-      const y = (Math.random() * 4) - 7; // 位于底部 -7 到 -3 的位置
-      
-      treeTargets[i3]     = r * Math.cos(theta);
+      const y = (Math.random() - 0.5) * 4 - 6;
+      treeTargets[i3] = r * Math.cos(theta);
       treeTargets[i3 + 1] = y;
       treeTargets[i3 + 2] = r * Math.sin(theta);
-      
-      masterColors[i3]     = cTrunk.r;
+      masterColors[i3] = cTrunk.r;
       masterColors[i3 + 1] = cTrunk.g;
       masterColors[i3 + 2] = cTrunk.b;
     } 
-    // ---------------------------------------------------------
-    // 2. 彩灯逻辑 (10% - 20% 的粒子: 0.1 - 0.2)
-    // ---------------------------------------------------------
-    else if (i < count * 0.2) {
-      const hNorm = Math.pow(Math.random(), 1.2); // 使用 pow 让灯光分布更均匀
-      const y = hNorm * 14 - 5; // 高度分布
-      const r = (1 - hNorm) * 6.3; // 稍微靠外一点，防止被树叶完全遮挡
-      const theta = Math.random() * Math.PI * 2;
-      
-      treeTargets[i3]     = r * Math.cos(theta);
-      treeTargets[i3 + 1] = y;
-      treeTargets[i3 + 2] = r * Math.sin(theta);
-
-      // 设置超高亮度颜色以触发 Bloom 辉光效果
-      const lightRand = Math.random();
-      if (lightRand > 0.6) {
-        // 暖金色灯
-        masterColors[i3] = 5.0; masterColors[i3 + 1] = 4.0; masterColors[i3 + 2] = 0.5;
-      } else if (lightRand > 0.3) {
-        // 鲜红色灯
-        masterColors[i3] = 5.0; masterColors[i3 + 1] = 0.2; masterColors[i3 + 2] = 0.2;
-      } else {
-        // 亮白色/冰蓝色灯
-        masterColors[i3] = 3.0; masterColors[i3 + 1] = 3.5; masterColors[i3 + 2] = 5.0;
-      }
-    } 
-    // ---------------------------------------------------------
-    // 3. 照片粒子逻辑 (20% - 40% 的粒子: 0.2 - 0.4)
-    // ---------------------------------------------------------
-    else if (i < count * 0.4) {
-      const hNorm = Math.random();
-      const y = hNorm * 14 - 5;
-      const r = (1 - hNorm) * 5.8; // 位于树叶层表面附近
-      const theta = Math.random() * Math.PI * 2;
-      
-      treeTargets[i3]     = r * Math.cos(theta);
-      treeTargets[i3 + 1] = y;
-      treeTargets[i3 + 2] = r * Math.sin(theta);
-
-      // 颜色设为纯白 (1,1,1)，这样你的照片 PNG 纹理能显示其原始色彩
-      masterColors[i3]     = 1.0;
-      masterColors[i3 + 1] = 1.0;
-      masterColors[i3 + 2] = 1.0;
-    } 
-    // ---------------------------------------------------------
-    // 4. 树叶逻辑 (40% - 100% 的粒子: 0.4 - 1.0)
-    // ---------------------------------------------------------
+    // 2. 树叶与“超亮”彩灯
     else {
-      const hNorm = Math.pow(Math.random(), 1.5); // 树形锥体逻辑
-      const y = hNorm * 14 - 5;
-      const r = (1 - hNorm) * 6 * Math.sqrt(Math.random()); // 内部随机填充
-      const theta = Math.random() * Math.PI * 2;
+      const yNorm = Math.pow(Math.random(), 1.5);
+      const height = 14;
+      const y = yNorm * height - 6;
+      const r = (1 - yNorm) * 6 * Math.sqrt(Math.random());
+      const theta = Math.random() * Math.PI * 2 * 10;
       
-      treeTargets[i3]     = r * Math.cos(theta);
+      treeTargets[i3] = r * Math.cos(theta);
       treeTargets[i3 + 1] = y;
       treeTargets[i3 + 2] = r * Math.sin(theta);
 
-      // 树叶颜色，稍微调暗一点以衬托彩灯
-      const shade = 0.3 + Math.random() * 0.3;
-      masterColors[i3]     = cTree.r * shade;
-      masterColors[i3 + 1] = cTree.g * shade;
-      masterColors[i3 + 2] = cTree.b * shade;
+      // --- 关键改进：增加彩灯的亮度 ---
+      if (Math.random() < 0.08) { // 8% 的粒子作为彩灯
+        const lightType = Math.random();
+        if (lightType > 0.6) {
+          // 超亮金光 (RGB值远超 1.0 以触发 Bloom)
+          masterColors[i3] = 4.0; masterColors[i3 + 1] = 3.5; masterColors[i3 + 2] = 0.5;
+        } else {
+          // 超亮红光
+          masterColors[i3] = 4.0; masterColors[i3 + 1] = 0.2; masterColors[i3 + 2] = 0.2;
+        }
+      } else {
+        // 普通树叶颜色调暗，衬托彩灯
+        masterColors[i3] = cTree.r * 0.4;
+        masterColors[i3 + 1] = cTree.g * 0.4;
+        masterColors[i3 + 2] = cTree.b * 0.4;
+      }
     }
   }
 }
