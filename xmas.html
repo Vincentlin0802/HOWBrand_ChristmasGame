@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auto Assets + Upload Brand Logo + Gestures</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
+
+  <style>
+    body { margin:0; overflow:hidden; background:#050505; font-family:'Cinzel',serif; user-select:none; }
+    #canvas-container { position:absolute; inset:0; z-index:1; }
+
+    #topbar{
+      position:absolute; top:16px; left:16px; right:16px; z-index:15;
+      display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap;
+      pointer-events:none;
+    }
+    #controls{
+      pointer-events:auto;
+      background:rgba(0,0,0,.35);
+      border:1px solid rgba(212,175,55,.35);
+      border-radius:12px;
+      padding:10px;
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    }
+    .btn{
+      border:1px solid rgba(212,175,55,.75);
+      color:#D4AF37;
+      background:transparent;
+      padding:8px 12px;
+      border-radius:10px;
+      font-family:'Cinzel',serif;
+      font-size:12px;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      cursor:pointer;
+    }
+    .btn:hover{ background:#D4AF37; color:#000; }
+
+    #hud{
+      pointer-events:none;
+      background:rgba(0,0,0,.35);
+      border:1px solid rgba(212,175,55,.35);
+      border-radius:12px;
+      padding:10px 12px;
+      color:#fff;
+      font-size:13px;
+      white-space:pre;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+
+    #mode{
+      position:absolute; top:16px; right:16px; z-index:12;
+      background:rgba(0,0,0,.35);
+      border:1px solid rgba(212,175,55,.45);
+      border-radius:999px;
+      padding:8px 12px;
+      color:#D4AF37;
+      font-size:12px;
+      letter-spacing:.14em;
+      text-transform:uppercase;
+      display:none;
+      pointer-events:none;
+    }
+
+    #webcam-preview{
+      position:absolute; bottom:16px; right:16px; width:160px; height:120px;
+      border:2px solid #D4AF37; opacity:.6; z-index:20; transform:scaleX(-1); border-radius:10px;
+    }
+
+    #loading{
+      position:absolute; inset:0; z-index:99; display:flex; align-items:center; justify-content:center;
+      background:rgba(0,0,0,.92); color:#D4AF37; font-size:16px; text-align:center; padding:24px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      white-space:pre-wrap;
+    }
+
+    #story-overlay{
+      position:absolute; inset:0; z-index:60;
+      display:none; align-items:center; justify-content:center;
+      background:rgba(0,0,0,0.78);
+      pointer-events:none;
+    }
+    #story-card{
+      width:min(78vw, 980px);
+      height:min(78vh, 720px);
+      border:1px solid rgba(212,175,55,0.75);
+      border-radius:14px;
+      background:rgba(10,10,10,0.85);
+      box-shadow:0 0 40px rgba(212,175,55,0.15);
+      display:flex; flex-direction:column;
+      overflow:hidden;
+    }
+    #story-header{
+      padding:14px 18px;
+      border-bottom:1px solid rgba(212,175,55,0.25);
+      color:#D4AF37;
+      letter-spacing:0.08em;
+      display:flex; justify-content:space-between; align-items:center; gap:12px;
+    }
+    #story-header span{
+      letter-spacing:0; color:#fff; opacity:0.85; font-style:italic; font-size:14px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    #story-img-wrap{ flex:1; display:flex; align-items:center; justify-content:center; padding:16px; }
+    #story-img{ max-width:100%; max-height:100%; object-fit:contain; border-radius:10px; }
+  </style>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+      "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="loading">Loading...\n(Run via http://localhost; not file://)</div>
+
+  <div id="topbar">
+    <div id="controls">
+      <button class="btn" id="btn-upload-logo">Upload Brand Logo</button>
+      <button class="btn" id="btn-reload-assets">Reload Assets</button>
+    </div>
+    <div id="hud">Boot...</div>
+  </div>
+
+  <div id="mode">STORY MODE</div>
+
+  <div id="story-overlay">
+    <div id="story-card">
+      <div id="story-header">
+        <div>STORY VIEW</div>
+        <span>Pinch: next · OK-Sign: exit</span>
+      </div>
+      <div id="story-img-wrap">
+        <img id="story-img" alt="Story" />
+      </div>
+    </div>
+  </div>
+
+  <video id="webcam-preview" autoplay playsinline muted></video>
+  <div id="canvas-container"></div>
+
+  <input id="logo-file-input" type="file" accept="image/png,image/jpeg" style="display:none" />
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
+
+    const CONFIG = {
+      particleCount: 15000,
+      particleSize: 0.52,
+      snowCount: 800,
+
+      bloom: { threshold: 0.1, strength: 1.0, radius: 0.5 },
+
+      gestureHistory: 8,
+      minVotesToSwitch: 5,
+      switchCooldownMs: 450,
+
+      pinchThreshold: 0.23,
+      pinchRelease: 0.30,
+      pinchCooldownMs: 550,
+
+      okThreshold: 0.23,
+      okHoldMs: 220,
+
+      minHandScaleForPinch: 0.085,
+      framesToArmPinch: 6,
+
+      // assets
+      tipManifestUrl: './assets/tip/tip_manifest.json',
+      storyManifestUrl: './assets/story/story_manifest.json',
+      tipBaseUrl: './assets/tip/',
+      storyBaseUrl: './assets/story/',
+
+      // default logo path (auto load)
+      defaultLogoUrl: './assets/logo/brand_logo.png',
+
+      // logo sampling
+      logoSampleStep: 2,            // higher = fewer points, faster
+      logoAlphaThreshold: 40,       // 0-255
+      logoScale: 0.085,             // spatial scaling of logo points
+      logoYOffset: 2.0
+    };
+
+    const hud = document.getElementById('hud');
+    const modeBadge = document.getElementById('mode');
+    const loading = document.getElementById('loading');
+    const storyOverlay = document.getElementById('story-overlay');
+    const storyImg = document.getElementById('story-img');
+
+    const logoInput = document.getElementById('logo-file-input');
+    document.getElementById('btn-upload-logo').addEventListener('click', () => logoInput.click());
+
+    document.getElementById('btn-reload-assets').addEventListener('click', async () => {
+      try {
+        loading.style.display = 'flex';
+        loading.textContent = 'Reloading assets...';
+        await autoLoadFromManifestsAndLogo();
+        rebuildParticleCloudsBalanced(particleTextures);
+        setHUD();
+        loading.style.display = 'none';
+      } catch (e) {
+        console.error(e);
+        loading.style.display = 'flex';
+        loading.textContent = 'Reload failed:\n' + String(e);
+      }
+    });
+
+    logoInput.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        loading.style.display = 'flex';
+        loading.textContent = 'Loading uploaded logo...';
+
+        const tex = await fileToTexture(file);
+        await generateLogoFromTexture(tex);
+
+        loading.style.display = 'none';
+        setHUD();
+      } catch (err) {
+        console.error(err);
+        loading.style.display = 'flex';
+        loading.textContent = 'Logo upload failed:\n' + String(err);
+      } finally {
+        e.target.value = '';
+      }
+    });
+
+    let scene, camera, renderer, composer;
+    let handLandmarker;
+    let snowSystem, starMesh;
+
+    let targetShape = 'explode';
+    const masterPositions = new Float32Array(CONFIG.particleCount * 3);
+    const masterColors = new Float32Array(CONFIG.particleCount * 3);
+
+    let treeTargets, heartTargets, logoTargets, explodeTargets;
+
+    let storyMode = false;
+    let storyImages = [];
+    let lastStoryIndex = -1;
+
+    let wasPinched = false;
+    let lastPinchFire = 0;
+    let okCandidateStart = 0;
+    let okActive = false;
+
+    const gestureQueue = [];
+    let currentStableGesture = null;
+    let lastSwitchTime = 0;
+
+    let noHandFrames = 0;
+    let handPresentFrames = 0;
+    let pinchArmed = false;
+
+    let particleClouds = [];
+    let particleTextures = [];
+
+    const clock = new THREE.Clock();
+
+    function setHUD() {
+      const counts = particleClouds.map(c => c.count);
+      hud.textContent =
+        `Textures: ${particleTextures.length}\n` +
+        `Clouds: ${particleClouds.length}\n` +
+        `Counts: [${counts.join(", ")}]\n` +
+        `Story: ${storyImages.length}\n` +
+        `Logo: ${logoTargets ? 'READY' : '—'}\n` +
+        `Gesture: ${currentStableGesture || '—'}\n`;
+    }
+
+    async function init() {
+      try {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050505);
+        scene.fog = new THREE.FogExp2(0x050505, 0.02);
+
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 35);
+
+        renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const renderScene = new RenderPass(scene, camera);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.threshold = CONFIG.bloom.threshold;
+        bloomPass.strength = CONFIG.bloom.strength;
+        bloomPass.radius = CONFIG.bloom.radius;
+
+        composer = new EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+
+        generateTreeData();
+        generateHeartData();
+        generateExplodeData();
+
+        for (let i = 0; i < CONFIG.particleCount * 3; i++) masterPositions[i] = explodeTargets[i];
+        for (let i = 0; i < CONFIG.particleCount; i++) {
+          const i3 = i * 3;
+          masterColors[i3] = 1; masterColors[i3 + 1] = 1; masterColors[i3 + 2] = 1;
+        }
+
+        loading.textContent = "Loading manifests + default logo...";
+        await autoLoadFromManifestsAndLogo();
+
+        if (particleTextures.length < 2) throw new Error("Tip textures must be 2 images via tip_manifest.json");
+
+        rebuildParticleCloudsBalanced(particleTextures);
+        createSnow();
+        createStar();
+
+        loading.textContent = "Loading hand tracking...";
+        await initMediaPipe();
+
+        loading.remove();
+        setHUD();
+        clock.start();
+        animate();
+        window.addEventListener('resize', onWindowResize);
+
+      } catch (e) {
+        console.error(e);
+        loading.textContent =
+          "Failed to start.\n\n" +
+          "1) Run via http://localhost (python3 -m http.server 8000)\n" +
+          "2) Check assets paths & filenames (case sensitive)\n" +
+          "3) Ensure assets/logo/brand_logo.png exists (png with transparency recommended)\n\n" +
+          String(e);
+      }
+    }
+
+    async function autoLoadFromManifestsAndLogo() {
+      // Tip + Story from manifest
+      const tipList = await fetchManifest(CONFIG.tipManifestUrl, true);
+      const storyList = await fetchManifest(CONFIG.storyManifestUrl, false);
+
+      const texA = await loadTextureFromUrl(CONFIG.tipBaseUrl + tipList[0]);
+      const texB = await loadTextureFromUrl(CONFIG.tipBaseUrl + tipList[1]);
+      particleTextures = [texA, texB];
+
+      storyImages = storyList.map(n => CONFIG.storyBaseUrl + n);
+
+      // Default logo auto-load
+      try {
+        const logoTex = await loadTextureFromUrl(CONFIG.defaultLogoUrl);
+        await generateLogoFromTexture(logoTex);
+      } catch (e) {
+        // fallback: if no logo file, create a simple text logo
+        console.warn('Default logo load failed, using text fallback:', e);
+        generateLogoFromTextFallback("LOGO");
+      }
+    }
+
+    async function fetchManifest(url, require2) {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`Manifest fetch failed: ${url}`);
+      const json = await res.json();
+      const arr = Array.isArray(json?.images) ? json.images : [];
+      const out = arr.filter(x => typeof x === 'string' && x.length > 0);
+      if (require2 && out.length < 2) throw new Error(`Manifest needs >=2 images: ${url}`);
+      if (!require2 && out.length === 0) throw new Error(`Empty manifest: ${url}`);
+      return out;
+    }
+
+    function configureParticleTexture(tex) {
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.generateMipmaps = false;
+      tex.anisotropy = 1;
+      tex.needsUpdate = true;
+    }
+
+    function loadTextureFromUrl(url) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          const tex = new THREE.Texture(img);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          configureParticleTexture(tex);
+          resolve(tex);
+        };
+        img.onerror = () => reject(new Error("Texture load failed: " + url));
+        img.src = url;
+      });
+    }
+
+    function fileToTexture(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const tex = new THREE.Texture(img);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          configureParticleTexture(tex);
+          resolve(tex);
+        };
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    async function generateLogoFromTexture(tex) {
+      // sample pixels from image to produce logoTargets
+      const img = tex.image;
+      if (!img || !img.width || !img.height) throw new Error('Logo texture image not available');
+
+      const canvas = document.createElement('canvas');
+      const maxW = 512;
+      const scale = Math.min(1, maxW / img.width);
+      canvas.width = Math.max(1, Math.floor(img.width * scale));
+      canvas.height = Math.max(1, Math.floor(img.height * scale));
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      const pts = [];
+      const step = CONFIG.logoSampleStep;
+      const alphaTh = CONFIG.logoAlphaThreshold;
+
+      // collect points where alpha is strong (transparent background recommended)
+      for (let y = 0; y < height; y += step) {
+        for (let x = 0; x < width; x += step) {
+          const a = data[(y * width + x) * 4 + 3];
+          if (a > alphaTh) {
+            pts.push({ x, y });
+          }
+        }
+      }
+
+      if (pts.length < 50) throw new Error('Logo image has too few opaque pixels. Use PNG with transparency and clear logo mark.');
+
+      // shuffle points for better distribution
+      for (let i = pts.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        const t = pts[i]; pts[i] = pts[j]; pts[j] = t;
+      }
+
+      logoTargets = new Float32Array(CONFIG.particleCount * 3);
+
+      // center to origin
+      const cx = width / 2;
+      const cy = height / 2;
+
+      const s = CONFIG.logoScale;
+      const yOff = CONFIG.logoYOffset;
+
+      for (let i = 0; i < CONFIG.particleCount; i++) {
+        const p = pts[i % pts.length];
+        const px = (p.x - cx) * s;
+        const py = -(p.y - cy) * s;
+
+        logoTargets[i * 3] = px;
+        logoTargets[i * 3 + 1] = py + yOff;
+        logoTargets[i * 3 + 2] = 0;
+      }
+    }
+
+    function generateLogoFromTextFallback(text) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 400; canvas.height = 140;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 80px "Cinzel"';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+      const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const pts = [];
+      for (let y = 0; y < height; y += 2) {
+        for (let x = 0; x < width; x += 2) {
+          const r = data[(y * width + x) * 4];
+          if (r > 128) pts.push({ x, y });
+        }
+      }
+
+      logoTargets = new Float32Array(CONFIG.particleCount * 3);
+      const cx = width / 2, cy = height / 2;
+      const s = 0.08, yOff = 2.0;
+
+      for (let i = 0; i < CONFIG.particleCount; i++) {
+        const p = pts[i % pts.length] || { x: cx, y: cy };
+        logoTargets[i * 3] = (p.x - cx) * s;
+        logoTargets[i * 3 + 1] = -(p.y - cy) * s + yOff;
+        logoTargets[i * 3 + 2] = 0;
+      }
+    }
+
+    function rebuildParticleCloudsBalanced(textures) {
+      for (const c of particleClouds) {
+        scene.remove(c.points);
+        c.points.geometry.dispose();
+        c.points.material.dispose();
+      }
+      particleClouds = [];
+
+      // 2 textures => strict 50/50
+      const all = new Uint32Array(CONFIG.particleCount);
+      for (let i = 0; i < CONFIG.particleCount; i++) all[i] = i;
+      shuffleUint32(all);
+
+      const half = Math.floor(CONFIG.particleCount / 2);
+      const sizes = [CONFIG.particleCount - half, half];
+
+      let cursor = 0;
+      const groups = sizes.map(sz => {
+        const sub = new Uint32Array(sz);
+        for (let i = 0; i < sz; i++) sub[i] = all[cursor++];
+        return sub;
+      });
+
+      for (let g = 0; g < 2; g++) {
+        const idxArr = groups[g];
+        const count = idxArr.length;
+
+        const positions = new Float32Array(count * 3);
+        const colors = new Float32Array(count * 3);
+
+        for (let j = 0; j < count; j++) {
+          const p = idxArr[j];
+          const p3 = p * 3;
+          const j3 = j * 3;
+          positions[j3] = masterPositions[p3];
+          positions[j3 + 1] = masterPositions[p3 + 1];
+          positions[j3 + 2] = masterPositions[p3 + 2];
+          colors[j3] = masterColors[p3];
+          colors[j3 + 1] = masterColors[p3 + 1];
+          colors[j3 + 2] = masterColors[p3 + 2];
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.PointsMaterial({
+          size: CONFIG.particleSize,
+          vertexColors: true,
+          map: textures[g],
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.NormalBlending,
+          alphaTest: 0.01
+        });
+
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+        particleClouds.push({ points, indices: idxArr, count });
+      }
+    }
+
+    function shuffleUint32(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+      }
+    }
+
+    // ===== Shapes =====
+    function generateExplodeData() {
+      explodeTargets = new Float32Array(CONFIG.particleCount * 3);
+      for (let i = 0; i < CONFIG.particleCount; i++) {
+        const r = 10 + Math.random() * 30;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        explodeTargets[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+        explodeTargets[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        explodeTargets[i * 3 + 2] = r * Math.cos(phi);
+      }
+    }
+
+    function generateTreeData() {
+      treeTargets = new Float32Array(CONFIG.particleCount * 3);
+      const cTree = new THREE.Color(0x0B6623);
+      const cTrunk = new THREE.Color(0x4B3621);
+
+      for (let i = 0; i < CONFIG.particleCount; i++) {
+        const i3 = i * 3;
+        if (i < CONFIG.particleCount * 0.1) {
+          const r = Math.random() * 0.6;
+          const theta = Math.random() * Math.PI * 2;
+          const y = (Math.random() - 0.5) * 4 - 6;
+
+          treeTargets[i3] = r * Math.cos(theta);
+          treeTargets[i3 + 1] = y;
+          treeTargets[i3 + 2] = r * Math.sin(theta);
+
+          masterColors[i3] = cTrunk.r; masterColors[i3 + 1] = cTrunk.g; masterColors[i3 + 2] = cTrunk.b;
+        } else {
+          const yNorm = Math.pow(Math.random(), 1.5);
+          const height = 14;
+          const y = yNorm * height - 6;
+          const r = (1 - yNorm) * 6 * Math.sqrt(Math.random());
+          const theta = Math.random() * Math.PI * 2 * 10;
+
+          treeTargets[i3] = r * Math.cos(theta);
+          treeTargets[i3 + 1] = y;
+          treeTargets[i3 + 2] = r * Math.sin(theta);
+
+          if (Math.random() < 0.05) {
+            masterColors[i3] = 1.0; masterColors[i3 + 1] = 0.9; masterColors[i3 + 2] = 0.2;
+          } else {
+            masterColors[i3] = cTree.r * (0.6 + Math.random() * 0.4);
+            masterColors[i3 + 1] = cTree.g * (0.6 + Math.random() * 0.4);
+            masterColors[i3 + 2] = cTree.b;
+          }
+        }
+      }
+    }
+
+    function generateHeartData() {
+      heartTargets = new Float32Array(CONFIG.particleCount * 3);
+      const cRed = new THREE.Color(0xD00000);
+      for (let i = 0; i < CONFIG.particleCount; i++) {
+        const t = Math.random() * Math.PI * 2;
+        const r = Math.random();
+        const scale = 0.5;
+
+        let x = 16 * Math.pow(Math.sin(t), 3);
+        let y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+        x *= scale * r;
+        y *= scale * r;
+
+        heartTargets[i * 3] = x;
+        heartTargets[i * 3 + 1] = y + 2;
+        heartTargets[i * 3 + 2] = (Math.random() - 0.5) * 4 * r;
+
+        masterColors[i * 3] = cRed.r; masterColors[i * 3 + 1] = cRed.g; masterColors[i * 3 + 2] = cRed.b;
+      }
+    }
+
+    // ===== Snow/Star =====
+    let snowPositions, snowVelocities;
+    function createSnow() {
+      const geo = new THREE.BufferGeometry();
+      snowPositions = new Float32Array(CONFIG.snowCount * 3);
+      snowVelocities = new Float32Array(CONFIG.snowCount);
+
+      for (let i = 0; i < CONFIG.snowCount; i++) {
+        snowPositions[i * 3] = (Math.random() - 0.5) * 60;
+        snowPositions[i * 3 + 1] = Math.random() * 40;
+        snowPositions[i * 3 + 2] = (Math.random() - 0.5) * 60;
+        snowVelocities[i] = 0.8 + Math.random() * 1.8;
+      }
+
+      geo.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
+      const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.2, transparent: true, opacity: 0.6 });
+      snowSystem = new THREE.Points(geo, mat);
+      scene.add(snowSystem);
+    }
+
+    function createStar() {
+      const geo = new THREE.OctahedronGeometry(0.8);
+      const mat = new THREE.MeshBasicMaterial({ color: 0xD4AF37 });
+      starMesh = new THREE.Mesh(geo, mat);
+      starMesh.position.y = 9;
+      scene.add(starMesh);
+    }
+
+    // ===== MediaPipe =====
+    async function initMediaPipe() {
+      const vision = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
+      );
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
+        },
+        numHands: 1,
+        runningMode: 'VIDEO',
+        minHandDetectionConfidence: 0.65,
+        minHandPresenceConfidence: 0.65,
+        minTrackingConfidence: 0.65
+      });
+      await startWebcam();
+    }
+
+    async function startWebcam() {
+      const video = document.getElementById('webcam-preview');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: 640, height: 480 }
+      });
+      video.srcObject = stream;
+      await new Promise(res => video.addEventListener('loadeddata', res, { once: true }));
+      processVideo();
+    }
+
+    let lastVideoTime = -1;
+    function processVideo() {
+      const video = document.getElementById('webcam-preview');
+
+      if (video.readyState >= 2 && handLandmarker) {
+        if (video.currentTime !== lastVideoTime) {
+          const results = handLandmarker.detectForVideo(video, performance.now());
+
+          if (results.landmarks && results.landmarks.length > 0) {
+            noHandFrames = 0;
+            handPresentFrames++;
+            if (handPresentFrames >= CONFIG.framesToArmPinch) pinchArmed = true;
+
+            const lm = results.landmarks[0];
+
+            const okNow = detectOKSignRaw(lm);
+            updateOkHold(okNow);
+
+            detectGestureStable(lm);
+
+            if (!(isZoomVisible() && okActive)) handlePinchEvent(lm);
+          } else {
+            noHandFrames++;
+            handPresentFrames = 0;
+            pinchArmed = false;
+            wasPinched = false;
+            okCandidateStart = 0;
+            okActive = false;
+
+            if (noHandFrames > 20) {
+              gestureQueue.length = 0;
+              currentStableGesture = null;
+            }
+          }
+
+          lastVideoTime = video.currentTime;
+          setHUD();
+        }
+      }
+      requestAnimationFrame(processVideo);
+    }
+
+    // ===== Story control =====
+    function setStoryMode(on) {
+      storyMode = on;
+      modeBadge.style.display = storyMode ? 'block' : 'none';
+      if (!storyMode) storyOverlay.style.display = 'none';
+      handPresentFrames = 0;
+      pinchArmed = false;
+      wasPinched = false;
+    }
+
+    function isZoomVisible() { return storyOverlay.style.display === 'flex'; }
+    function exitZoomOnly() { storyOverlay.style.display = 'none'; }
+
+    function showRandomStoryImage() {
+      if (!storyImages.length) return;
+      let idx = Math.floor(Math.random() * storyImages.length);
+      if (storyImages.length > 1 && idx === lastStoryIndex) idx = (idx + 1) % storyImages.length;
+      lastStoryIndex = idx;
+      storyImg.src = storyImages[idx];
+      storyOverlay.style.display = 'flex';
+    }
+
+    function handlePinchEvent(lm) {
+      if (!storyMode || !pinchArmed) return;
+
+      const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const wrist = lm[0];
+      const handScale = Math.max(0.001, dist(wrist, lm[9]));
+      if (handScale < CONFIG.minHandScaleForPinch) { wasPinched = false; return; }
+
+      const pinchNorm = dist(lm[4], lm[8]) / handScale;
+      const isPinched = pinchNorm < CONFIG.pinchThreshold;
+      const isReleased = pinchNorm > CONFIG.pinchRelease;
+      const now = performance.now();
+
+      if (!wasPinched && isPinched) {
+        if ((now - lastPinchFire) > CONFIG.pinchCooldownMs) {
+          showRandomStoryImage();
+          lastPinchFire = now;
+        }
+        wasPinched = true;
+      }
+      if (wasPinched && isReleased) wasPinched = false;
+    }
+
+    function updateOkHold(okNow) {
+      const now = performance.now();
+      if (isZoomVisible()) {
+        if (okNow) {
+          if (okCandidateStart === 0) okCandidateStart = now;
+          if (!okActive && (now - okCandidateStart) >= CONFIG.okHoldMs) {
+            okActive = true;
+            exitZoomOnly();
+          }
+        } else {
+          okCandidateStart = 0;
+          okActive = false;
+        }
+      } else {
+        okCandidateStart = 0;
+        okActive = false;
+      }
+    }
+
+    // ===== OK sign =====
+    function detectOKSignRaw(lm) {
+      const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const wrist = lm[0];
+      const handScale = Math.max(0.001, dist(wrist, lm[9]));
+      const pinchNorm = dist(lm[4], lm[8]) / handScale;
+      const thumbIndexClose = pinchNorm < CONFIG.okThreshold;
+
+      const fingerExtended = (tipIdx, pipIdx, mcpIdx) => {
+        const tip = lm[tipIdx], pip = lm[pipIdx], mcp = lm[mcpIdx];
+        const margin = 0.25 * handScale;
+        return (pip.y - tip.y) > margin && (mcp.y - tip.y) > margin;
+      };
+      return thumbIndexClose && fingerExtended(12, 10, 9) && fingerExtended(16, 14, 13) && fingerExtended(20, 18, 17);
+    }
+
+    // ===== Gesture stable =====
+    function detectGestureStable(lm) {
+      const raw = detectGestureRaw(lm);
+      if (raw) {
+        gestureQueue.push(raw);
+        if (gestureQueue.length > CONFIG.gestureHistory) gestureQueue.shift();
+      } else {
+        return currentStableGesture;
+      }
+
+      const counts = {};
+      for (const g of gestureQueue) counts[g] = (counts[g] || 0) + 1;
+
+      let best = null, bestCount = 0;
+      for (const k in counts) {
+        if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
+      }
+
+      const now = performance.now();
+      const canSwitch = (now - lastSwitchTime) > CONFIG.switchCooldownMs;
+
+      if (best && bestCount >= CONFIG.minVotesToSwitch && best !== currentStableGesture && canSwitch) {
+        currentStableGesture = best;
+        lastSwitchTime = now;
+
+        if (best === 'fist') { targetShape = 'tree'; setStoryMode(false); }
+        else if (best === 'open') { targetShape = 'explode'; setStoryMode(true); }
+        else if (best === 'thumbsup') { targetShape = 'heart'; setStoryMode(false); }
+        else if (best === 'vsign') { targetShape = 'logo'; setStoryMode(false); }
+      }
+      return currentStableGesture;
+    }
+
+    function detectGestureRaw(lm) {
+      const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const wrist = lm[0];
+      const handScale = Math.max(0.001, dist(wrist, lm[9]));
+
+      const palmCenter = {
+        x: (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5,
+        y: (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 5
+      };
+      const tipNearPalm = (tipIdx) => dist(lm[tipIdx], palmCenter) < (0.55 * handScale);
+
+      const fingerExtended = (tipIdx, pipIdx, mcpIdx) => {
+        const tip = lm[tipIdx], pip = lm[pipIdx], mcp = lm[mcpIdx];
+        const margin = 0.25 * handScale;
+        return (pip.y - tip.y) > margin && (mcp.y - tip.y) > margin;
+      };
+
+      const indexExt  = fingerExtended(8, 6, 5);
+      const middleExt = fingerExtended(12, 10, 9);
+      const ringExt   = fingerExtended(16, 14, 13);
+      const pinkyExt  = fingerExtended(20, 18, 17);
+
+      const thumbUp = (() => {
+        const margin = 0.18 * handScale;
+        const t4 = lm[4], t3 = lm[3], t2 = lm[2], t1 = lm[1];
+        const thumbExtendedUp =
+          (t3.y - t4.y) > margin &&
+          (t2.y - t3.y) > margin * 0.6 &&
+          (t1.y - t2.y) > margin * 0.4;
+
+        const othersFolded =
+          (!indexExt && !middleExt && !ringExt && !pinkyExt) &&
+          tipNearPalm(8) && tipNearPalm(12) && tipNearPalm(16) && tipNearPalm(20);
+
+        const thumbAwayFromPalm = dist(lm[4], palmCenter) > (0.75 * handScale);
+        const thumbAboveWrist = (wrist.y - lm[4].y) > (0.12 * handScale);
+
+        return thumbExtendedUp && othersFolded && thumbAwayFromPalm && thumbAboveWrist;
+      })();
+
+      if (thumbUp) return 'thumbsup';
+      if (indexExt && middleExt && !ringExt && !pinkyExt) return 'vsign';
+      if (indexExt && middleExt && ringExt && pinkyExt) return 'open';
+      if (!indexExt && !middleExt && !ringExt && !pinkyExt &&
+          tipNearPalm(8) && tipNearPalm(12) && tipNearPalm(16) && tipNearPalm(20)) return 'fist';
+      return null;
+    }
+
+    // ===== Animation loop =====
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const dt = Math.min(0.05, clock.getDelta());
+      const lerp = 0.05;
+
+      let source;
+      if (targetShape === 'tree') source = treeTargets;
+      else if (targetShape === 'heart') source = heartTargets;
+      else if (targetShape === 'logo' && logoTargets) source = logoTargets;
+      else source = explodeTargets;
+
+      const useVertexColors = (targetShape === 'tree' || targetShape === 'heart' || (targetShape === 'logo' && !!logoTargets));
+
+      for (let i = 0; i < CONFIG.particleCount; i++) {
+        const i3 = i * 3;
+        masterPositions[i3]     += (source[i3]     - masterPositions[i3])     * lerp;
+        masterPositions[i3 + 1] += (source[i3 + 1] - masterPositions[i3 + 1]) * lerp;
+        masterPositions[i3 + 2] += (source[i3 + 2] - masterPositions[i3 + 2]) * lerp;
+
+        if (!useVertexColors) {
+          masterColors[i3]     += (1 - masterColors[i3]) * 0.05;
+          masterColors[i3 + 1] += (1 - masterColors[i3 + 1]) * 0.05;
+          masterColors[i3 + 2] += (1 - masterColors[i3 + 2]) * 0.05;
+        }
+      }
+
+      for (const cloud of particleClouds) {
+        const posArr = cloud.points.geometry.attributes.position.array;
+        const colArr = cloud.points.geometry.attributes.color.array;
+        const idxArr = cloud.indices;
+
+        for (let j = 0; j < idxArr.length; j++) {
+          const p = idxArr[j];
+          const p3 = p * 3;
+          const j3 = j * 3;
+          posArr[j3]     = masterPositions[p3];
+          posArr[j3 + 1] = masterPositions[p3 + 1];
+          posArr[j3 + 2] = masterPositions[p3 + 2];
+          colArr[j3]     = masterColors[p3];
+          colArr[j3 + 1] = masterColors[p3 + 1];
+          colArr[j3 + 2] = masterColors[p3 + 2];
+        }
+
+        cloud.points.geometry.attributes.position.needsUpdate = true;
+        cloud.points.geometry.attributes.color.needsUpdate = true;
+      }
+
+      if (starMesh) starMesh.visible = (targetShape === 'tree');
+      if (starMesh) starMesh.rotation.y += 0.6 * dt;
+
+      const sPos = snowSystem.geometry.attributes.position.array;
+      for (let i = 0; i < CONFIG.snowCount; i++) {
+        sPos[i * 3 + 1] -= snowVelocities[i] * dt * 6.0;
+        if (sPos[i * 3 + 1] < -10) {
+          sPos[i * 3 + 1] = 30;
+          sPos[i * 3]     = (Math.random() - 0.5) * 60;
+          sPos[i * 3 + 2] = (Math.random() - 0.5) * 60;
+        }
+      }
+      snowSystem.geometry.attributes.position.needsUpdate = true;
+
+      composer.render();
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      composer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    window.addEventListener('load', init);
+  </script>
+</body>
+</html>
