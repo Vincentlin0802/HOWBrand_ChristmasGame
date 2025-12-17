@@ -404,6 +404,20 @@
       });
     }
 
+    // 在 script 标签内添加
+function createCircleTexture(color = '#ffffff', blur = false) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64; canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, color);
+  gradient.addColorStop(blur ? 1 : 0.5, 'transparent');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(canvas);
+  return tex;
+}
+
     // --------- BRAND LOGO from folder ----------
     async function loadBrandLogoFromFolder(forceBust=false) {
       try {
@@ -549,70 +563,68 @@
     }
 
     // --------- particles 50/50 ----------
-    function rebuildParticleCloudsBalanced(textures) {
-      for (const c of particleClouds) {
-        scene.remove(c.points);
-        c.points.geometry.dispose();
-        c.points.material.dispose();
-      }
-      particleClouds = [];
+    function rebuildParticleClouds(photoTextures) {
+  // 1. 清理旧的组
+  for (const c of particleClouds) {
+    scene.remove(c.points);
+    c.points.geometry.dispose();
+    c.points.material.dispose();
+  }
+  particleClouds = [];
 
-      const all = new Uint32Array(CONFIG.particleCount);
-      for (let i = 0; i < CONFIG.particleCount; i++) all[i] = i;
-      for (let i = all.length - 1; i > 0; i--) {
-        const j = (Math.random() * (i + 1)) | 0;
-        const tmp = all[i]; all[i] = all[j]; all[j] = tmp;
-      }
+  // 2. 定义纹理池
+  const textures = {
+    trunk: createCircleTexture('#4B3621', false), // 树干用实心圆
+    light: createCircleTexture('#ffffff', true),  // 彩灯用发光圆
+    leaf:  createCircleTexture('#0B6623', true),  // 树叶用柔和圆
+    photoA: photoTextures[0],
+    photoB: photoTextures[1]
+  };
 
-      const half = Math.floor(CONFIG.particleCount / 2);
-      const sizes = [CONFIG.particleCount - half, half];
+  // 3. 定义粒子的分配规则 (必须与 generateTreeData 中的 i 范围一致)
+  const count = CONFIG.particleCount;
+  const groups = [
+    { name: 'trunk', range: [0, count * 0.1], tex: textures.trunk, size: 0.8 },
+    { name: 'lights', range: [count * 0.1, count * 0.2], tex: textures.light, size: 1.2 },
+    { name: 'photos', range: [count * 0.2, count * 0.4], tex: null, size: 1.5 }, // 特殊处理照片
+    { name: 'leaves', range: [count * 0.4, count], tex: textures.leaf, size: 1.0 }
+  ];
 
-      let cursor = 0;
-      const groups = sizes.map(sz => {
-        const sub = new Uint32Array(sz);
-        for (let i = 0; i < sz; i++) sub[i] = all[cursor++];
-        return sub;
-      });
+  groups.forEach(group => {
+    const start = Math.floor(group.range[0]);
+    const end = Math.floor(group.range[1]);
+    const num = end - start;
+    if (num <= 0) return;
 
-      for (let g = 0; g < 2; g++) {
-        const idxArr = groups[g];
-        const count = idxArr.length;
+    const idxArr = new Uint32Array(num);
+    for (let i = 0; i < num; i++) idxArr[i] = start + i;
 
-        const positions = new Float32Array(count * 3);
-        const colors = new Float32Array(count * 3);
-
-        for (let j = 0; j < count; j++) {
-          const p = idxArr[j];
-          const p3 = p * 3;
-          const j3 = j * 3;
-          positions[j3] = masterPositions[p3];
-          positions[j3 + 1] = masterPositions[p3 + 1];
-          positions[j3 + 2] = masterPositions[p3 + 2];
-          colors[j3] = masterColors[p3];
-          colors[j3 + 1] = masterColors[p3 + 1];
-          colors[j3 + 2] = masterColors[p3 + 2];
-        }
-
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-        const material = new THREE.PointsMaterial({
-          size: CONFIG.particleSize,
-          vertexColors: true,
-          map: textures[g],
-          transparent: true,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-          alphaTest: 0.01
-        });
-
-        const points = new THREE.Points(geometry, material);
-        scene.add(points);
-        particleClouds.push({ points, indices: idxArr, count });
-      }
+    // 处理照片交替纹理
+    let finalTex = group.tex;
+    if (group.name === 'photos') {
+      // 这里的逻辑可以更复杂，目前简单演示
+      finalTex = textures.photoA; 
     }
 
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(num * 3), 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(num * 3), 3));
+
+    const material = new THREE.PointsMaterial({
+      size: group.size || CONFIG.particleSize,
+      vertexColors: true,
+      map: finalTex,
+      transparent: true,
+      depthWrite: false,
+      blending: group.name === 'lights' ? THREE.AdditiveBlending : THREE.NormalBlending,
+      alphaTest: 0.01
+    });
+
+    const points = new THREE.Points(geometry, material);
+    scene.add(points);
+    particleClouds.push({ points, indices: idxArr, count: num });
+  });
+}
     // --------- shapes ----------
     function generateExplodeData() {
       explodeTargets = new Float32Array(CONFIG.particleCount * 3);
@@ -722,7 +734,7 @@
       const geo = new THREE.OctahedronGeometry(0.8);
       const mat = new THREE.MeshBasicMaterial({ color: 0xD4AF37 });
       starMesh = new THREE.Mesh(geo, mat);
-      starMesh.position.y = 11;
+      starMesh.position.y = 10;
       scene.add(starMesh);
     }
 
